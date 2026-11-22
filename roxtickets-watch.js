@@ -171,103 +171,135 @@ if (!state.events) state.events = {};
 // and state file only reflect current targets.
 for (const k of Object.keys(state.events)) if (!EVENTS.includes(k)) delete state.events[k];
 
-let exitCode = 0;
-const today = new Date().toISOString().slice(0, 10); // UTC date, e.g. "2026-09-16"
-const summaryLines = [];
+const failing = new Set(); // events currently in a failure streak
 
-for (const eventName of EVENTS) {
-  try {
-    const listings = await fetchListings(eventName);
-    const available = listings.filter((t) => t.available_for === 'available');
+// One round: check every event, update state, send the daily heartbeat.
+// Returns true if every event was checked successfully.
+async function checkOnce() {
+  let ok = true;
+  const today = new Date().toISOString().slice(0, 10); // UTC date, e.g. "2026-09-16"
+  const summaryLines = [];
 
-    const cfg = WATCH[eventName];
-    const { confirmed, fallback: fallbackOnly, outOfWindow } = classify(available, cfg);
+  for (const eventName of EVENTS) {
+    try {
+      const listings = await fetchListings(eventName);
+      const available = listings.filter((t) => t.available_for === 'available');
 
-    console.log(
-      `${eventName}: ${available.length} available listing(s) total, ${confirmed.length} ${cfg.label}${cfg.from ? ' in trip window' : ''}, ${fallbackOnly.length} fallback match, ${outOfWindow.length} target-division outside window`
-    );
+      const cfg = WATCH[eventName];
+      const { confirmed, fallback: fallbackOnly, outOfWindow } = classify(available, cfg);
 
-    // Full dump for visibility — every listing regardless of category. Log only,
-    // never pushed as a notification. created_by (seller's real name) is
-    // deliberately omitted — that's someone else's personal data, not needed
-    // to see what's for sale.
-    if (listings.length > 0) {
-      console.log(`  all listings for ${eventName}:`);
-      for (const t of listings) {
-        console.log(
-          `    [${t.ticket_id}] ${t.category_name.padEnd(20)} ${dayLabel(t).padEnd(11)} $${t.total}` +
-            ` status=${t.available_for}${t.charity_ticket ? ' charity' : ''}${t.is_discounted ? ' discounted' : ''}`
-        );
+      console.log(
+        `${eventName}: ${available.length} available listing(s) total, ${confirmed.length} ${cfg.label}${cfg.from ? ' in trip window' : ''}, ${fallbackOnly.length} fallback match, ${outOfWindow.length} target-division outside window`
+      );
+
+      // Full dump for visibility — every listing regardless of category. Log only,
+      // never pushed as a notification. created_by (seller's real name) is
+      // deliberately omitted — that's someone else's personal data, not needed
+      // to see what's for sale.
+      if (listings.length > 0) {
+        console.log(`  all listings for ${eventName}:`);
+        for (const t of listings) {
+          console.log(
+            `    [${t.ticket_id}] ${t.category_name.padEnd(20)} ${dayLabel(t).padEnd(11)} $${t.total}` +
+              ` status=${t.available_for}${t.charity_ticket ? ' charity' : ''}${t.is_discounted ? ' discounted' : ''}`
+          );
+        }
+      } else {
+        console.log(`  no listings at all for ${eventName}`);
       }
-    } else {
-      console.log(`  no listings at all for ${eventName}`);
-    }
 
-    if (confirmed.length > 0) {
-      const cheapest = confirmed.reduce((a, b) => (a.total < b.total ? a : b));
-      await push({
-        title: `${eventName} - ${cheapest.category_name} listing on Hybrid Tickets`,
-        body:
-          confirmed.map((t) => `${t.category_name}, ${dayLabel(t)}: $${t.total}`).join('\n') +
-          `\nOpen the app to buy.`,
-        priority: 'urgent',
-      });
-      console.log('notification sent (confirmed match)');
-    }
-
-    if (fallbackOnly.length > 0) {
-      const cheapest = fallbackOnly.reduce((a, b) => (a.total < b.total ? a : b));
-      await push({
-        title: `${eventName} - possible ${cfg.label} listing`,
-        body:
-          `Category name isn't an exact match for ${cfg.label}, but looks close: ` +
-          `"${cheapest.category_name}" (${dayLabel(cheapest)}) at $${cheapest.total}. Check the app.`,
-        priority: 'high',
-      });
-      console.log('notification sent (fallback match — verify category name)');
-    }
-
-    // Activity alert — fires only when the total available count for this
-    // event CHANGES from last run. Not on every run while it sits non-zero,
-    // otherwise this becomes the every-10-minutes spam we're avoiding.
-    const prevCount = state.events[eventName]?.available ?? null;
-    if (prevCount !== available.length) {
-      const breakdown = available.length > 0 ? categoryBreakdown(available) : '(none)';
-      const direction = prevCount === null ? 'baseline' : available.length > prevCount ? 'increased' : 'decreased';
-      console.log(`  activity: ${prevCount ?? 'n/a'} -> ${available.length} (${direction})`);
-      // Skip the very first-ever run (prevCount === null) — that's just
-      // establishing the baseline, not a real change worth a ping.
-      if (prevCount !== null) {
+      if (confirmed.length > 0) {
+        const cheapest = confirmed.reduce((a, b) => (a.total < b.total ? a : b));
         await push({
-          title: `${eventName} - listing activity on Hybrid Tickets`,
-          body: `Available listings ${direction}: ${prevCount} -> ${available.length}.\n${breakdown}`,
-          priority: 'default',
+          title: `${eventName} - ${cheapest.category_name} listing on Hybrid Tickets`,
+          body:
+            confirmed.map((t) => `${t.category_name}, ${dayLabel(t)}: $${t.total}`).join('\n') +
+            `\nOpen the app to buy.`,
+          priority: 'urgent',
         });
-        console.log('notification sent (activity change)');
+        console.log('notification sent (confirmed match)');
       }
+
+      if (fallbackOnly.length > 0) {
+        const cheapest = fallbackOnly.reduce((a, b) => (a.total < b.total ? a : b));
+        await push({
+          title: `${eventName} - possible ${cfg.label} listing`,
+          body:
+            `Category name isn't an exact match for ${cfg.label}, but looks close: ` +
+            `"${cheapest.category_name}" (${dayLabel(cheapest)}) at $${cheapest.total}. Check the app.`,
+          priority: 'high',
+        });
+        console.log('notification sent (fallback match — verify category name)');
+      }
+
+      // Activity alert — fires only when the total available count for this
+      // event CHANGES from last run. Not on every run while it sits non-zero,
+      // otherwise this becomes the every-10-minutes spam we're avoiding.
+      const prevCount = state.events[eventName]?.available ?? null;
+      if (prevCount !== available.length) {
+        const breakdown = available.length > 0 ? categoryBreakdown(available) : '(none)';
+        const direction = prevCount === null ? 'baseline' : available.length > prevCount ? 'increased' : 'decreased';
+        console.log(`  activity: ${prevCount ?? 'n/a'} -> ${available.length} (${direction})`);
+        // Skip the very first-ever run (prevCount === null) — that's just
+        // establishing the baseline, not a real change worth a ping.
+        if (prevCount !== null) {
+          await push({
+            title: `${eventName} - listing activity on Hybrid Tickets`,
+            body: `Available listings ${direction}: ${prevCount} -> ${available.length}.\n${breakdown}`,
+            priority: 'default',
+          });
+          console.log('notification sent (activity change)');
+        }
+      }
+
+      state.events[eventName] = { available: available.length, categories: categoryBreakdown(available) };
+      summaryLines.push(`${eventName}: ${available.length} available (${categoryBreakdown(available) || 'none'})`);
+      failing.delete(eventName);
+    } catch (err) {
+      console.error(`${eventName}: FAILED — ${err.message}`);
+      console.log(`::error title=roxtickets-watch ${eventName}::${String(err.message).slice(0, 300)}`);
+      // Alert once per failure streak, not every round.
+      if (!failing.has(eventName)) {
+        failing.add(eventName);
+        await push({ title: `roxtickets-watch error (${eventName})`, body: err.message, priority: 'high' }).catch(() => {});
+      }
+      ok = false;
     }
-
-    state.events[eventName] = { available: available.length, categories: categoryBreakdown(available) };
-    summaryLines.push(`${eventName}: ${available.length} available (${categoryBreakdown(available) || 'none'})`);
-  } catch (err) {
-    console.error(`${eventName}: FAILED — ${err.message}`);
-    await push({ title: `roxtickets-watch error (${eventName})`, body: err.message, priority: 'high' }).catch(() => {});
-    exitCode = 1;
   }
+
+  // Daily heartbeat — once per UTC calendar day, regardless of activity.
+  // This is the "yes, it's still running" signal. A missing heartbeat for a
+  // day means something broke — check the Actions tab.
+  if (state.lastHeartbeat !== today && ok) {
+    await push({
+      title: 'roxtickets-watch heartbeat',
+      body: `Still checking every ${INTERVAL_MINUTES} min.\n${summaryLines.join('\n')}`,
+      priority: 'min',
+    });
+    state.lastHeartbeat = today;
+    console.log('heartbeat sent');
+  }
+
+  await writeState(state);
+  return ok;
 }
 
-// Daily heartbeat — once per UTC calendar day, regardless of activity.
-// This is the "yes, it's still running" signal. A missing heartbeat for a
-// day means something broke — check the Actions tab.
-if (state.lastHeartbeat !== today && exitCode === 0) {
-  await push({
-    title: 'roxtickets-watch heartbeat',
-    body: `Still checking every 10 min.\n${summaryLines.join('\n')}`,
-    priority: 'min',
-  });
-  state.lastHeartbeat = today;
-  console.log('heartbeat sent');
-}
+// GitHub's scheduler only fires every few hours lately, so one run keeps
+// checking every INTERVAL_MINUTES for LOOP_MINUTES (set in the workflow).
+// LOOP_MINUTES=0 means check once and exit (handy for a manual test).
+// state.json is written every round and committed by the workflow at the end.
+const LOOP_MINUTES = Number(process.env.LOOP_MINUTES || 0);
+const INTERVAL_MINUTES = Number(process.env.INTERVAL_MINUTES || 5);
+const deadline = Date.now() + LOOP_MINUTES * 60000;
+let lastOk = true;
+let round = 0;
+do {
+  const started = Date.now();
+  console.log(`--- round ${++round} at ${new Date().toISOString()}`);
+  lastOk = await checkOnce();
+  const wait = INTERVAL_MINUTES * 60000 - (Date.now() - started);
+  if (Date.now() + Math.max(wait, 0) >= deadline) break;
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+} while (Date.now() < deadline);
 
-await writeState(state);
-process.exit(exitCode);
+process.exit(lastOk ? 0 : 1);

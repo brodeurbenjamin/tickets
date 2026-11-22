@@ -1,8 +1,16 @@
 name: roxtickets-watch
 on:
   schedule:
-    - cron: '*/10 * * * *'
+    # GitHub only fires schedules every few hours lately, so each run keeps
+    # checking for ~5h40m (LOOP_MINUTES). A trigger that arrives while a run is
+    # going waits in the queue and starts as soon as it ends. Odd minutes avoid
+    # the busy top-of-the-hour slots.
+    - cron: '3,13,23,33,43,53 * * * *'
   workflow_dispatch:
+    inputs:
+      loop_minutes:
+        description: 'How long to keep checking (0 = one check, for testing)'
+        default: '340'
 permissions:
   contents: write
 concurrency:
@@ -11,24 +19,26 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 355   # GitHub's limit is 360
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: main   # latest state.json, not the one from when this run was queued
       - name: Check listings
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ROX_TOKEN: ${{ secrets.ROX_TOKEN }}
+          LOOP_MINUTES: ${{ inputs.loop_minutes || '340' }}
+          INTERVAL_MINUTES: '5'
         run: node roxtickets-watch.js
       - name: Save state
+        if: ${{ !cancelled() }}
         run: |
           git config user.name "roxtickets-watch bot"
           git config user.email "actions@github.com"
           git add state.json
-          # Nothing changed -> nothing to push. Most runs end here, so a GitHub
-          # blip can't fail the job.
           if git diff --staged --quiet; then echo "state unchanged"; exit 0; fi
           git commit -m "update state"
-          # Retry a few times in case of a brief GitHub hiccup or a newer commit.
           for i in 1 2 3; do
             git push && exit 0
             echo "push attempt $i failed, retrying"

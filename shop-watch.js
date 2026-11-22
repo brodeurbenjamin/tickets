@@ -15,6 +15,10 @@
  * while the regular tickets are sold out, so including them would alert on
  * every run. Adaptive tickets are left out too.
  *
+ * Each run loops (see LOOP_MINUTES below): an urgent alert repeats every
+ * round while a ticket stays buyable; an error alert is sent once per failure
+ * streak, not every round.
+ *
  * Alerts, per check:
  *   URGENT - a matching regular ticket's button is enabled.
  *   HIGH   - no matching ticket on the page at all (layout or naming changed).
@@ -125,9 +129,10 @@ async function runCheck(browser, check) {
 
 // Each check gets one retry after a short pause (most failures are a slow
 // page load or a network blip). A check failing twice doesn't stop the others.
-async function main() {
+// Returns the labels of checks that failed.
+async function checkAll() {
   const browser = await chromium.launch();
-  let failed = 0;
+  const failed = [];
   try {
     for (const check of CHECKS) {
       try {
@@ -138,19 +143,50 @@ async function main() {
         try {
           await runCheck(browser, check);
         } catch (err) {
-          failed++;
-          const msg = String(err.message).split('\n')[0].slice(0, 300);
+          failed.push({ label: check.label, msg: String(err.message).split('\n')[0].slice(0, 300) });
           console.error(`${check.label}: FAILED: ${err.message}`);
-          // Shows as the failure reason on the GitHub run page.
-          console.log(`::error title=${check.label} check failed::${msg}`);
-          await push({ title: `hyrox-watch error (${check.label})`, body: msg, priority: 'high' }).catch(() => {});
         }
       }
     }
   } finally {
     await browser.close();
   }
-  process.exit(failed ? 1 : 0);
+  return failed;
+}
+
+// GitHub's scheduler only fires every few hours lately, so one run keeps
+// checking every INTERVAL_MINUTES for LOOP_MINUTES (set in the workflow).
+// LOOP_MINUTES=0 means check once and exit (handy for a manual test).
+const LOOP_MINUTES = Number(process.env.LOOP_MINUTES || 0);
+const INTERVAL_MINUTES = Number(process.env.INTERVAL_MINUTES || 10);
+
+async function main() {
+  const deadline = Date.now() + LOOP_MINUTES * 60000;
+  const failing = new Set(); // checks currently in a failure streak (alert once per streak)
+  let lastFailed = [];
+  let round = 0;
+  do {
+    const started = Date.now();
+    console.log(`--- round ${++round} at ${new Date().toISOString()}`);
+    lastFailed = await checkAll();
+    for (const f of lastFailed) {
+      console.log(`::error title=${f.label} check failed::${f.msg}`);
+      if (!failing.has(f.label)) {
+        failing.add(f.label);
+        await push({ title: `hyrox-watch error (${f.label})`, body: f.msg, priority: 'high' }).catch(() => {});
+      }
+    }
+    for (const label of [...failing]) {
+      if (!lastFailed.some((f) => f.label === label)) {
+        failing.delete(label);
+        console.log(`${label}: recovered`);
+      }
+    }
+    const wait = INTERVAL_MINUTES * 60000 - (Date.now() - started);
+    if (Date.now() + Math.max(wait, 0) >= deadline) break;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  } while (Date.now() < deadline);
+  process.exit(lastFailed.length ? 1 : 0);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();
