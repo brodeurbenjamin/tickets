@@ -3,7 +3,7 @@ name: hyrox-watch
 on:
   schedule:
     # GitHub only fires schedules every few hours lately, so each run keeps
-    # checking every 10 min for 90 min (LOOP_MINUTES). A trigger that arrives
+    # checking every 10 min for 3 hours (LOOP_MINUTES). A trigger that arrives
     # while a run is going waits in the queue and starts when it ends. Odd
     # minutes avoid the busy top-of-the-hour slots. Targets: shop-watch.js.
     - cron: '7,17,27,37,47,57 * * * *'
@@ -11,7 +11,7 @@ on:
     inputs:
       loop_minutes:
         description: 'How long to keep checking (0 = one check, for testing)'
-        default: '90'
+        default: '180'
  
 concurrency:
   group: hyrox-watch
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 105
+    timeout-minutes: 195
     container:
       # Browsers are preinstalled here, so no download on every run.
       # Keep this tag in step with the playwright version in package.json.
@@ -34,6 +34,6 @@ jobs:
       - name: Check official shop
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-          LOOP_MINUTES: ${{ inputs.loop_minutes || '90' }}
+          LOOP_MINUTES: ${{ inputs.loop_minutes || '180' }}
           INTERVAL_MINUTES: '10'
         run: node shop-watch.js

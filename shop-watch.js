@@ -28,13 +28,13 @@ import { chromium } from 'playwright';
 
 const CHECKS = [
   {
-    label: "HYROX Ottawa - Men's Open",
+    label: "Ottawa Men's Open",
     shop: 'https://ca.hyrox.com/tickets/6adf8ccfd5d2d382e327bf65',
     drill: ['Singles', 'Open', 'Men'],
     name: /^HYROX MEN \|/i, // Wed 21 - Sat 24 Apr 2027
   },
   {
-    label: "HYROX Ottawa - Men's Pro",
+    label: "Ottawa Men's Pro",
     shop: 'https://ca.hyrox.com/tickets/6adf8ccfd5d2d382e327bf65',
     drill: ['Singles', 'Pro', 'Men'],
     name: /^HYROX PRO MEN \|/i, // Fri 23 Apr 2027 only
@@ -62,11 +62,30 @@ async function push({ title, body, priority = 'default', click }) {
 // [{ name, disabled }] for every ticket card on screen.
 export async function readTickets(page) {
   return page.$$eval('button[aria-label^="Add 1 "]', (els) =>
-    els.map((b) => ({
-      name: b.getAttribute('aria-label').replace(/^Add 1 /, '').replace(/ to the cart$/, ''),
-      disabled: b.disabled,
-    }))
+    els.map((b) => {
+      const text = b.innerText || '';
+      const date = text.match(/(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}/);
+      const price = text.match(/(?:CA|US|A|NZ)?\$\s?[\d,]+(?:\.\d{2})?|€\s?[\d.,]+|[\d.,]+\s?€/);
+      return {
+        name: b.getAttribute('aria-label').replace(/^Add 1 /, '').replace(/ to the cart$/, ''),
+        disabled: b.disabled,
+        date: date ? date[0] : null, // e.g. "Friday April 23"
+        price: price ? price[0] : null, // e.g. "CA$185.00"
+      };
+    })
   );
+}
+
+// "Friday April 23" -> "Fri 23 Apr"; falls back to the day in the ticket name.
+export function shortDate(t) {
+  const m = String(t.date || '').match(/^(\w{3})\w*\s+(\w{3})\w*\s+(\d{1,2})$/);
+  if (m) return `${m[1]} ${m[3]} ${m[2]}`;
+  return String(t.name).split('|').pop().trim();
+}
+
+// One line per buyable ticket, e.g. "Fri 23 Apr - CA$185.00".
+export function ticketLines(tickets) {
+  return tickets.map((t) => `${shortDate(t)}${t.price ? ` - ${t.price}` : ''}`).join('\n');
 }
 
 export function evaluate(tickets, check) {
@@ -105,16 +124,16 @@ async function runCheck(browser, check) {
 
     if (tier === 'urgent') {
       await push({
-        title: check.label,
-        body: `Tickets are live:\n${buyable.map((t) => t.name).join('\n')}`,
+        title: `${check.label}: tickets available`,
+        body: `${ticketLines(buyable)}\nOn sale now on the official shop. Tap to open it.`,
         priority: 'urgent',
         click: check.shop,
       });
       console.log('  notification sent (urgent)');
     } else if (tier === 'structure') {
       await push({
-        title: `hyrox-watch: page changed (${check.label})`,
-        body: `No matching ticket found after clicking ${check.drill.join(' > ')}. The script needs updating.`,
+        title: `${check.label}: can't find tickets`,
+        body: `The shop page has changed, so this check can't see the tickets any more. Ask Claude to update it.`,
         priority: 'high',
         click: check.shop,
       });
@@ -173,7 +192,11 @@ async function main() {
       console.log(`::error title=${f.label} check failed::${f.msg}`);
       if (!failing.has(f.label)) {
         failing.add(f.label);
-        await push({ title: `hyrox-watch error (${f.label})`, body: f.msg, priority: 'high' }).catch(() => {});
+        await push({
+          title: `${f.label}: check failing`,
+          body: `Couldn't check the official shop (${f.msg}). It will keep retrying; you'll only hear about it again if it starts failing after recovering.`,
+          priority: 'high',
+        }).catch(() => {});
       }
     }
     for (const label of [...failing]) {

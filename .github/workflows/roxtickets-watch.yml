@@ -2,7 +2,7 @@ name: roxtickets-watch
 on:
   schedule:
     # GitHub only fires schedules every few hours lately, so each run keeps
-    # checking for 90 min (LOOP_MINUTES). A trigger that arrives while a run is
+    # checking for 3 hours (LOOP_MINUTES). A trigger that arrives while a run is
     # going waits in the queue and starts as soon as it ends. Odd minutes avoid
     # the busy top-of-the-hour slots.
     - cron: '3,13,23,33,43,53 * * * *'
@@ -10,7 +10,7 @@ on:
     inputs:
       loop_minutes:
         description: 'How long to keep checking (0 = one check, for testing)'
-        default: '90'
+        default: '180'
 permissions:
   contents: write
 concurrency:
@@ -19,7 +19,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 105
+    timeout-minutes: 195
     steps:
       - uses: actions/checkout@v5
         with:
@@ -28,7 +28,7 @@ jobs:
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           ROX_TOKEN: ${{ secrets.ROX_TOKEN }}
-          LOOP_MINUTES: ${{ inputs.loop_minutes || '90' }}
+          LOOP_MINUTES: ${{ inputs.loop_minutes || '180' }}
           INTERVAL_MINUTES: '5'
         run: node roxtickets-watch.js
       - name: Save state

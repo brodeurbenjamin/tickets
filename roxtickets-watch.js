@@ -80,7 +80,8 @@ export function inWindow(t, cfg) {
 function dayLabel(t) {
   const d = listingDate(t);
   if (!d) return 'day unknown';
-  const dow = String(t.day).split(' ')[1] || '';
+  const raw = String(t.day).split(' ')[1] || '';
+  const dow = raw ? raw[0].toUpperCase() + raw.slice(1, 3).toLowerCase() : '';
   return `${dow} ${Number(d.slice(8))} ${['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(d.slice(5, 7))]}`.trim();
 }
 export function classify(available, cfg) {
@@ -154,10 +155,15 @@ async function writeState(state) {
   await fs.writeFile(STATE_FILE, JSON.stringify(state, null, 2));
 }
 
+// "Mens Pro" -> "Men's Pro", "Women Open" -> "Women's Open"
+function pretty(category) {
+  return String(category).replace(/^(wo)?mens?\b/i, (m) => (/^wo/i.test(m) ? "Women's" : "Men's"));
+}
+
 function categoryBreakdown(listings) {
   const counts = {};
   for (const t of listings) {
-    const k = `${t.category_name} (${dayLabel(t)})`;
+    const k = `${pretty(t.category_name)} (${dayLabel(t)})`;
     counts[k] = (counts[k] || 0) + 1;
   }
   return Object.entries(counts)
@@ -211,10 +217,10 @@ async function checkOnce() {
       if (confirmed.length > 0) {
         const cheapest = confirmed.reduce((a, b) => (a.total < b.total ? a : b));
         await push({
-          title: `${eventName} - ${cheapest.category_name} listing on Hybrid Tickets`,
+          title: `${eventName} ${new Set(confirmed.map((t) => t.category_name)).size > 1 ? cfg.label : pretty(cheapest.category_name)}: resale listing`,
           body:
-            confirmed.map((t) => `${t.category_name}, ${dayLabel(t)}: $${t.total}`).join('\n') +
-            `\nOpen the app to buy.`,
+            confirmed.map((t) => `${pretty(t.category_name)}, ${dayLabel(t)} - $${t.total}`).join('\n') +
+            `\nOn Hybrid Tickets now. Open the app to buy.`,
           priority: 'urgent',
         });
         console.log('notification sent (confirmed match)');
@@ -223,10 +229,10 @@ async function checkOnce() {
       if (fallbackOnly.length > 0) {
         const cheapest = fallbackOnly.reduce((a, b) => (a.total < b.total ? a : b));
         await push({
-          title: `${eventName} - possible ${cfg.label} listing`,
+          title: `${eventName}: possible ${cfg.label} listing`,
           body:
-            `Category name isn't an exact match for ${cfg.label}, but looks close: ` +
-            `"${cheapest.category_name}" (${dayLabel(cheapest)}) at $${cheapest.total}. Check the app.`,
+            `Listed as "${cheapest.category_name}", ${dayLabel(cheapest)} - $${cheapest.total}. ` +
+            `Looks like ${cfg.label} but isn't an exact match; check it in Hybrid Tickets.`,
           priority: 'high',
         });
         console.log('notification sent (fallback match — verify category name)');
@@ -244,8 +250,10 @@ async function checkOnce() {
         // establishing the baseline, not a real change worth a ping.
         if (prevCount !== null) {
           await push({
-            title: `${eventName} - listing activity on Hybrid Tickets`,
-            body: `Available listings ${direction}: ${prevCount} -> ${available.length}.\n${breakdown}`,
+            title: `${eventName} resale: ${available.length > prevCount ? 'new listing' : 'listing gone'}`,
+            body:
+              `${available.length} listing${available.length === 1 ? '' : 's'} on Hybrid Tickets now (was ${prevCount}).` +
+              (available.length > 0 ? `\n${breakdown}` : ''),
             priority: 'default',
           });
           console.log('notification sent (activity change)');
@@ -253,15 +261,24 @@ async function checkOnce() {
       }
 
       state.events[eventName] = { available: available.length, categories: categoryBreakdown(available) };
-      summaryLines.push(`${eventName}: ${available.length} available (${categoryBreakdown(available) || 'none'})`);
-      failing.delete(eventName);
+      summaryLines.push(`${eventName}: ${available.length ? `${available.length} listing(s) - ${categoryBreakdown(available)}` : 'no listings'}`);
+      failing.delete(`${eventName}:auth`);
+      failing.delete(`${eventName}:other`);
     } catch (err) {
       console.error(`${eventName}: FAILED — ${err.message}`);
       console.log(`::error title=roxtickets-watch ${eventName}::${String(err.message).slice(0, 300)}`);
       // Alert once per failure streak, not every round.
-      if (!failing.has(eventName)) {
-        failing.add(eventName);
-        await push({ title: `roxtickets-watch error (${eventName})`, body: err.message, priority: 'high' }).catch(() => {});
+      // Separate streaks so an expired token is still reported after an outage.
+      const streak = `${eventName}:${/AUTH FAILED/.test(err.message) ? 'auth' : 'other'}`;
+      if (!failing.has(streak)) {
+        failing.add(streak);
+        await push({
+          title: `${eventName} resale: check failing`,
+          body: /AUTH FAILED/.test(err.message)
+            ? `Hybrid Tickets rejected the login token. Ask Claude how to refresh ROX_TOKEN.`
+            : `Couldn't check Hybrid Tickets (${err.message}). It will keep retrying.`,
+          priority: 'high',
+        }).catch(() => {});
       }
       ok = false;
     }
@@ -272,8 +289,8 @@ async function checkOnce() {
   // day means something broke — check the Actions tab.
   if (state.lastHeartbeat !== today && ok) {
     await push({
-      title: 'roxtickets-watch heartbeat',
-      body: `Still checking every ${INTERVAL_MINUTES} min.\n${summaryLines.join('\n')}`,
+      title: 'Ticket watch: running',
+      body: `Daily check-in. Hybrid Tickets is checked every ${INTERVAL_MINUTES} min while a run is active.\n${summaryLines.join('\n')}`,
       priority: 'min',
     });
     state.lastHeartbeat = today;
