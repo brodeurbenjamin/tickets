@@ -3,8 +3,7 @@ name: hyrox-watch
 on:
   schedule:
     # Every 10 minutes. GitHub's scheduler drifts 10-15 min under load and can
-    # skip runs entirely — fine for this. Currently watching HYROX Paris
-    # (Women's Open/Pro, 16-21 Dec 2026) and HYROX Phoenix (Men's Relay).
+    # skip runs entirely. Targets are listed in shop-watch.js (CHECKS).
     - cron: '*/10 * * * *'
   workflow_dispatch:        # manual run — also resets the 60-day inactivity timer
  
@@ -26,14 +25,7 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
  
-      - name: Paris - Women's Open/Pro
+      - name: Check official shop
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: node watch.js
-
-      - name: Phoenix - Men's Relay
-        if: ${{ !cancelled() }}   # still run if the Paris check failed
-        env:
-          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
-        run: node phoenix-relay-watch.js
- 
+        run: node shop-watch.js

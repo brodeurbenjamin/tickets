@@ -10,14 +10,12 @@
  * Each entry in `ticketData` is one individual seller's listing (this is a
  * peer marketplace, not an inventory feed) with category, price, and status.
  *
- * TARGETS (13 Oct 2026), configured per event in WATCH below:
- *   Paris   — Women's Open or Women's Pro, race days 16-21 Dec only (in Paris
- *             15-21 Dec; the 15th is arrival day).
- *   Phoenix — Men's Relay, any day.
+ * TARGETS (22 Nov 2026), configured per event in WATCH below:
+ *   Ottawa — Men's Open or Men's Pro, any day.
  *
  * Category naming seen in real data: "Mens Pro", "Mens Open", "Mixed
  * Doubles", and for women "Women Open" (no s; seen in state.json 13 Oct).
- * Paris `target` accepts "Women"/"Womens" + "Open"/"Pro". `fallback` is a wider
+ * Each `target` is the exact-match pattern; `fallback` is a wider
  * net; a fallback hit alerts one priority lower and quotes the real name.
  *
  * DATES — each listing has `day`, e.g. "19-11-2026 THU". Listings outside the
@@ -54,25 +52,18 @@
 // What to watch per event. `target` = urgent alert; `fallback` (minus
 // `exclude`) = "possible" alert; `from`/`to` = race-day window (null = any day).
 const WATCH = {
-  Paris: {
-    label: "Women's Open/Pro",
-    target: /^wom[ae]n'?s? (open|pro)$/i, // "Women Open" confirmed 13 Oct
-    fallback: /\bwom[ae]n'?s?\b.*\b(open|pro)\b|\b(open|pro)\b.*\bwom[ae]n'?s?\b/i,
-    exclude: /double|relay|mixed|adaptive|team|\bmen'?s?\b/i,
-    from: '2026-12-16', // trip is 15-21 Dec, 15th is arrival day
-    to: '2026-12-21',
-  },
-  // Event name and category string are pattern-based guesses ("Phoenix",
-  // "Mens Relay"), not yet seen in real data. Check the heartbeat lists
-  // Phoenix with a sensible count once listings exist.
-  Phoenix: {
-    label: "Men's Relay",
-    target: /^men'?s? relay$/i,
-    fallback: /\bmen'?s?\b.*\brelay\b|\brelay\b.*\bmen'?s?\b/i,
-    exclude: /wom[ae]n|mixed|double|corporate/i,
-    from: null,
+  // Event name "Ottawa" is assumed from how Nashville/Dallas were named; check
+  // the daily heartbeat lists Ottawa with a sensible count once listings exist.
+  // "Mens Open" and "Mens Pro" are confirmed category names from real data.
+  Ottawa: {
+    label: "Men's Open/Pro",
+    target: /^men'?s? (open|pro)$/i,
+    fallback: /\bmen'?s?\b.*\b(open|pro)\b|\b(open|pro)\b.*\bmen'?s?\b/i,
+    exclude: /wom[ae]n|double|relay|mixed|adaptive|team|corporate/i,
+    from: null, // any race day (Ottawa runs 21-25 Apr 2027)
     to: null,
   },
+  // Past targets (Paris Women's Open/Pro, Phoenix Men's Relay) are in git history.
 };
 const EVENTS = Object.keys(WATCH);
 
