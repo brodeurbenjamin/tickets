@@ -1,13 +1,9 @@
 {
   "events": {
-    "Paris": {
-      "available": 0,
-      "categories": ""
-    },
-    "Phoenix": {
+    "Ottawa": {
       "available": 0,
       "categories": ""
     }
   },
-  "lastHeartbeat": "2026-11-03"
+  "lastHeartbeat": "2026-11-22"
 }
