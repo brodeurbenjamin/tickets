@@ -53,6 +53,7 @@
 
 import { loadFiles, activeWatches, resaleEvents } from './watchlist.js';
 import { saveStatus } from './status.js';
+import { markFullLoop } from './chain.js';
 import { readFileSync } from 'fs';
 
 // What to watch per event, from watchlist.js. Each of an event's `cfgs` is one
@@ -363,4 +364,5 @@ do {
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 } while (Date.now() < deadline);
 
+if (LOOP_MINUTES > 0 && EVENTS.length) markFullLoop(); // the workflow starts the next run (chain.js)
 process.exit(lastOk ? 0 : 1);

@@ -36,6 +36,7 @@ import { chromium } from 'playwright';
 import { readFileSync } from 'fs';
 import { loadFiles, activeWatches, shopChecks } from './watchlist.js';
 import { saveStatus } from './status.js';
+import { markFullLoop } from './chain.js';
 
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
 if (!NTFY_TOPIC) { console.error('NTFY_TOPIC not set.'); process.exit(1); }
@@ -326,6 +327,7 @@ async function main() {
     if (Date.now() + Math.max(wait, 0) >= deadline) break;
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   } while (Date.now() < deadline);
+  if (LOOP_MINUTES > 0) markFullLoop(); // the workflow starts the next run (chain.js)
   process.exit(lastFailed.length ? 1 : 0);
 }
 
