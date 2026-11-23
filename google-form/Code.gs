@@ -14,6 +14,9 @@
  *   GITHUB_REPO       brodeurbenjamin/tickets
  *   NTFY_ADMIN_TOPIC  Ben's private topic: new requests with Approve / Decline
  *   NTFY_TOPIC        community topic: "Now watching ..." when a watch is approved
+ *   WEBAPP_URL        the web app's /exec address (Deploy > Manage deployments).
+ *                     Without it the script guesses its own address, which can be
+ *                     the /dev test address that only opens for the owner.
  *   GITHUB_BRANCH     optional, default "main"
  */
 const WATCHLIST_PATH = 'watchlist.json';
@@ -54,9 +57,10 @@ function printConfig() {
     ENTRY: { race: ids[0], type: ids[1], class: ids[2], gender: ids[3], name: ids[4] },
   };
   Logger.log('Paste this into site/config.js:\n\nwindow.TICKETS_CONFIG = ' + JSON.stringify(cfg, null, 2) + ';');
-  const url = ScriptApp.getService().getUrl();
+  const url = webAppUrl_();
   Logger.log(url ? 'Approve links use: ' + url
                  : 'Not deployed as a web app yet: Deploy > New deployment > Web app (Execute as: Me, Who has access: Anyone).');
+  if (url && !/\/exec$/.test(url)) Logger.log('That is not an /exec address. Set the WEBAPP_URL script property to the Web app URL from Deploy > Manage deployments.');
 }
 
 // ---------- checking a request ----------
@@ -148,8 +152,13 @@ function onSubmit(e) {
 
 // ---------- approval ----------
 
+// The public /exec address the Approve / Decline buttons open.
+function webAppUrl_() {
+  return PropertiesService.getScriptProperties().getProperty('WEBAPP_URL') || ScriptApp.getService().getUrl();
+}
+
 function askApproval_(w, race) {
-  const url = ScriptApp.getService().getUrl();
+  const url = webAppUrl_();
   const code = Utilities.getUuid();
   PropertiesService.getScriptProperties().setProperty('approve_' + code, w.id);
   const link = action => `${url}?code=${code}&action=${action}`;
