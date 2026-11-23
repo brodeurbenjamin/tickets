@@ -23,7 +23,7 @@ topic when tickets come up. The full plan is in `PLAN.md` (branch
    - `GITHUB_REPO`: `brodeurbenjamin/tickets`
    - `NTFY_ADMIN_TOPIC`: your private admin topic
    - `NTFY_TOPIC`: `alerts-hybridbyben-k7q2m9x4`
-3. **Deploy → New deployment → Web app**: Execute as **Me**, Who has access **Anyone**. This hosts the Approve / Decline links.
+3. **Deploy → New deployment → Web app**: Execute as **Me**, Who has access **Anyone**. This hosts the Approve / Decline links. Copy the **Web app URL** (ends in `/exec`) and add it as a fifth script property, `WEBAPP_URL`.
 4. Select `setup` and click **Run**; approve the permissions. The log prints a `window.TICKETS_CONFIG = {...}` block.
 5. Put that block in `site/config.js` on `main`. The request button turns on when the page republishes. (Lost it? Run `printConfig`.)
 
