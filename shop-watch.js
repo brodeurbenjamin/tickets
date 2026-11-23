@@ -11,6 +11,13 @@
  * one check per active watch. Earlier hard-coded targets (Paris, Phoenix) live
  * in this repo's git history.
  *
+ * RATE LIMITS — each race's shop is loaded once per round and every watched
+ * division read from that page, switching with the Class/Gender breadcrumbs;
+ * a different category, or a breadcrumb switch that shows nothing, costs one
+ * reload. Different races' shops are SHOP_GAP_MS apart, and a block page or
+ * 429 is never retried in the same round. Each division's days go to
+ * status/shop.json (see status.js) when they change.
+ *
  * CHARITY tickets (e.g. "CHARITY: RACE FOR IMPACT | HYROX MEN | Friday") are
  * deliberately left out: they need a fundraising pledge and are often on sale
  * while the regular tickets are sold out, so including them would alert on
@@ -26,7 +33,9 @@
  */
 
 import { chromium } from 'playwright';
+import { readFileSync } from 'fs';
 import { loadFiles, activeWatches, shopChecks } from './watchlist.js';
+import { saveStatus } from './status.js';
 
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
 if (!NTFY_TOPIC) { console.error('NTFY_TOPIC not set.'); process.exit(1); }
@@ -82,82 +91,177 @@ export function evaluate(tickets, check) {
   return { matches, buyable, tier };
 }
 
-async function runCheck(browser, check) {
+const SHOP_GAP_MS = Number(process.env.SHOP_GAP_MS ?? 5000); // pause between different races' shops
+const LEVELS = { 3: ['Category', 'Class', 'Gender'], 2: ['Category', 'Gender'] }; // breadcrumb names by drill depth
+
+async function openShop(page, shop) {
+  console.log(`loading ${shop}`);
+  const res = await page.goto(shop, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  if (res && res.status() === 429) throw Object.assign(new Error('shop answered 429 (too many requests)'), { blocked: true });
+  if (await page.getByText('Just a moment', { exact: false }).count()) {
+    throw Object.assign(new Error('Cloudflare challenge page - blocked'), { blocked: true });
+  }
+}
+
+// Move from the division on screen (`from`, a drill path, or null right after
+// loading) to `to`. Same category: click the breadcrumb of the first choice
+// that differs ("Class Open", "Gender Men") to go back to that step, then pick
+// the rest. Different category: reload, since the category step doesn't come
+// back reliably from its breadcrumb (checked 23 Nov 2026).
+async function pick(page, labels, timeout) {
+  for (const label of labels) {
+    const opt = page.getByRole('button', { name: label, exact: true }).first();
+    await opt.waitFor({ state: 'visible', timeout });
+    await opt.click();
+    await page.waitForTimeout(1500);
+  }
+}
+
+// If the breadcrumb route doesn't show the expected choice (seen going from
+// Women's Open to Men's Pro), reload and pick the whole path instead.
+// Returns true if it got there by breadcrumbs, false after a fresh load.
+async function goTo(page, shop, from, to) {
+  let done = false;
+  if (Array.isArray(from) && from[0] === to[0] && from.length === to.length) {
+    const k = to.findIndex((label, i) => label !== from[i]);
+    if (k === -1) return true; // already showing this division
+    try {
+      await pick(page, [`${LEVELS[from.length][k]} ${from[k]}`, ...to.slice(k)], 8000);
+      done = true;
+    } catch {
+      console.log(`  breadcrumb route to ${to.join(' > ')} didn't work, reloading`);
+    }
+  }
+  if (!done) {
+    if (from) await openShop(page, shop);
+    await pick(page, to, 25000);
+  }
+  await page.waitForSelector('button[aria-label^="Add 1 "]', { state: 'attached', timeout: 20000 }).catch(() => {});
+  return done;
+}
+
+// The list redraws after each switch; read it once this division's tickets
+// are on screen, or after 10 s, when "none" may be the real answer.
+async function readFor(page, check) {
+  let tickets = await readTickets(page);
+  for (let waited = 0; waited < 10000 && !tickets.some((t) => check.name.test(t.name)); waited += 1000) {
+    await page.waitForTimeout(1000);
+    tickets = await readTickets(page);
+  }
+  return tickets;
+}
+
+// Check every watched division on one race's shop from a single page load
+// (plus one reload per extra category). Alerts as each division is read.
+// Returns { status: { [watchId]: { days } }, failed: [{ label, msg, blocked }] }.
+async function runShop(browser, shop, checks) {
   const page = await browser.newPage({
     locale: 'en-US',
     userAgent:
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36',
   });
+  const status = {};
+  const failed = [];
   try {
-    await page.goto(check.shop, { waitUntil: 'domcontentloaded', timeout: 60000 });
-    if (await page.getByText('Just a moment', { exact: false }).count()) {
-      throw new Error('Cloudflare challenge page - blocked');
-    }
-    for (const label of check.drill) {
-      const opt = page.getByRole('button', { name: label, exact: true }).first();
-      await opt.waitFor({ state: 'visible', timeout: 25000 });
-      await opt.click();
-      await page.waitForTimeout(1500);
-    }
-    await page.waitForSelector('button[aria-label^="Add 1 "]', { state: 'attached', timeout: 20000 }).catch(() => {});
+    await openShop(page, shop);
+    let at = null;
+    for (const check of checks) {
+      let tickets;
+      try {
+        const viaCrumbs = await goTo(page, shop, at, check.drill);
+        at = check.drill;
+        tickets = await readFor(page, check);
+        // Nothing after a breadcrumb switch (seen for Men's -> Women's Doubles):
+        // never trust that; reload and pick the division from scratch.
+        if (viaCrumbs && !tickets.some((t) => check.name.test(t.name))) {
+          console.log(`  nothing shown for ${check.drill.join(' > ')} after switching, reloading`);
+          await goTo(page, shop, 'unknown', check.drill);
+          tickets = await readFor(page, check);
+        }
+      } catch (err) {
+        if (err.blocked) throw err;
+        failed.push({ label: check.label, msg: String(err.message).split('\n')[0].slice(0, 300) });
+        console.error(`${check.label}: FAILED: ${err.message}`);
+        at = 'unknown'; // page state unknown: the next division starts from a fresh load
+        continue;
+      }
 
-    const tickets = await readTickets(page);
-    const { matches, buyable, tier } = evaluate(tickets, check);
-    console.log(check.label);
-    for (const t of tickets) {
-      const watched = matches.includes(t) ? '' : '  (not watched)';
-      console.log(`  ${t.disabled ? 'unavailable' : 'BUYABLE    '}  ${t.name}${watched}`);
-    }
+      const { matches, buyable, tier } = evaluate(tickets, check);
+      console.log(check.label);
+      for (const t of tickets) {
+        const watched = matches.includes(t) ? '' : '  (not watched)';
+        console.log(`  ${t.disabled ? 'unavailable' : 'BUYABLE    '}  ${t.name}${watched}`);
+      }
+      status[check.id] = { days: matches.map((t) => ({ day: shortDate(t), buyable: !t.disabled, price: t.price })) };
 
-    if (tier === 'urgent') {
-      await push({
-        title: `${check.label}: tickets available`,
-        body: `${ticketLines(buyable)}\nOn sale now on the official shop. Tap to open it.`,
-        priority: 'urgent',
-        click: check.shop,
-      });
-      console.log('  notification sent (urgent)');
-    } else if (tier === 'structure') {
-      await push({
-        title: `${check.label}: can't find tickets`,
-        body: `The shop page has changed, so this check can't see the tickets any more. Ask Claude to update it.`,
-        priority: 'high',
-        click: check.shop,
-      });
-      console.log('  notification sent (structure changed)');
-    } else {
-      console.log('  all unavailable');
+      if (tier === 'urgent') {
+        await push({
+          title: `${check.label}: tickets available`,
+          body: `${ticketLines(buyable)}\nOn sale now on the official shop. Tap to open it.`,
+          priority: 'urgent',
+          click: check.shop,
+        });
+        console.log('  notification sent (urgent)');
+      } else if (tier === 'structure') {
+        await push({
+          title: `${check.label}: can't find tickets`,
+          body: `The shop page has changed, so this check can't see the tickets any more. Ask Claude to update it.`,
+          priority: 'high',
+          click: check.shop,
+        });
+        console.log('  notification sent (structure changed)');
+      } else {
+        console.log('  all unavailable');
+      }
     }
+  } catch (err) {
+    // Page load failed or the shop blocked us: every unchecked division fails.
+    const msg = String(err.message).split('\n')[0].slice(0, 300);
+    for (const c of checks) if (!status[c.id] && !failed.some((f) => f.label === c.label)) failed.push({ label: c.label, msg, blocked: !!err.blocked });
+    console.error(`${shop}: FAILED: ${err.message}`);
   } finally {
     await page.close();
   }
+  return { status, failed };
 }
 
-// Each check gets one retry after a short pause (most failures are a slow
-// page load or a network blip). A check failing twice doesn't stop the others.
-// Returns the labels of checks that failed.
+// Group checks by shop (one race = one shop page), same-category divisions
+// next to each other so they share a page load.
+export function byShop(checks) {
+  const groups = new Map();
+  for (const c of checks) groups.set(c.shop, [...(groups.get(c.shop) || []), c]);
+  for (const list of groups.values()) list.sort((a, b) => a.drill.join('>').localeCompare(b.drill.join('>')));
+  return groups;
+}
+
+// One round over every shop, a pause between shops. A shop with failed
+// divisions gets one retry after a short pause (most failures are a slow page
+// load or a network blip), but never when the shop blocked us: that waits for
+// the next round. Returns { status, failed }.
 async function checkAll(checks) {
   const browser = await chromium.launch();
+  const status = {};
   const failed = [];
   try {
-    for (const check of checks) {
-      try {
-        await runCheck(browser, check);
-      } catch (first) {
-        console.log(`${check.label}: attempt 1 failed: ${first.message} - retrying in 20s`);
-        await new Promise((r) => setTimeout(r, 20000));
-        try {
-          await runCheck(browser, check);
-        } catch (err) {
-          failed.push({ label: check.label, msg: String(err.message).split('\n')[0].slice(0, 300) });
-          console.error(`${check.label}: FAILED: ${err.message}`);
-        }
+    let first = true;
+    for (const [shop, group] of byShop(checks)) {
+      if (!first) await new Promise((r) => setTimeout(r, SHOP_GAP_MS));
+      first = false;
+      let r = await runShop(browser, shop, group);
+      if (r.failed.length && !r.failed.some((f) => f.blocked)) {
+        const again = group.filter((c) => r.failed.some((f) => f.label === c.label));
+        console.log(`${shop}: ${again.length} division(s) failed - retrying in 20s`);
+        await new Promise((res) => setTimeout(res, 20000));
+        const r2 = await runShop(browser, shop, again);
+        r = { status: { ...r.status, ...r2.status }, failed: r2.failed };
       }
+      Object.assign(status, r.status);
+      failed.push(...r.failed);
     }
   } finally {
     await browser.close();
   }
-  return failed;
+  return { status, failed };
 }
 
 // GitHub's scheduler only fires every few hours lately, so one run keeps
@@ -191,7 +295,16 @@ async function main() {
   do {
     const started = Date.now();
     console.log(`--- round ${++round} at ${new Date().toISOString()}`);
-    lastFailed = await checkAll(checks);
+    const { status, failed } = await checkAll(checks);
+    lastFailed = failed;
+    // Only watches checked this round are written; a failed one keeps its last
+    // known status rather than disappearing from the page.
+    const previous = (() => { try { return JSON.parse(readFileSync('status/shop.json', 'utf8')); } catch { return {}; } })();
+    const keep = Object.fromEntries(checks.filter((c) => !status[c.id] && previous[c.id]).map((c) => {
+      const { since, ...rest } = previous[c.id];
+      return [c.id, rest];
+    }));
+    if (saveStatus('status/shop.json', { ...keep, ...status })) console.log('status/shop.json updated');
     for (const f of lastFailed) {
       console.log(`::error title=${f.label} check failed::${f.msg}`);
       if (!failing.has(f.label)) {

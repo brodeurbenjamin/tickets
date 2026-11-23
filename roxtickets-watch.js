@@ -52,6 +52,8 @@
  */
 
 import { loadFiles, activeWatches, resaleEvents } from './watchlist.js';
+import { saveStatus } from './status.js';
+import { readFileSync } from 'fs';
 
 // What to watch per event, from watchlist.js. Each of an event's `cfgs` is one
 // division: `target` = urgent alert; `fallback` (minus `exclude`) = "possible"
@@ -205,6 +207,10 @@ async function checkOnce() {
   let ok = true;
   const today = new Date().toISOString().slice(0, 10); // UTC date, e.g. "2026-09-16"
   const summaryLines = [];
+  // Per watch: exact-match listings (day and price, never the seller). A race
+  // whose check fails keeps its last known status.
+  const status = {};
+  const previous = (() => { try { return JSON.parse(readFileSync('status/resale.json', 'utf8')); } catch { return {}; } })();
 
   for (const eventName of EVENTS) {
     try {
@@ -213,6 +219,13 @@ async function checkOnce() {
 
       const cfg = WATCH[eventName];
       const { confirmed, fallback: fallbackOnly, outOfWindow } = classifyEvent(available, cfg);
+      for (const c of cfg.cfgs) {
+        status[c.id] = {
+          listings: classify(available, c).confirmed
+            .map((t) => ({ day: dayLabel(t), date: listingDate(t), price: t.total }))
+            .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.price - b.price),
+        };
+      }
 
       console.log(
         `${eventName}: ${available.length} available listing(s) total, ${confirmed.length} ${cfg.label}${cfg.cfgs.some((c) => c.from) ? ' in trip window' : ''}, ${fallbackOnly.length} fallback match, ${outOfWindow.length} target-division outside window`
@@ -301,8 +314,15 @@ async function checkOnce() {
         }).catch(() => {});
       }
       ok = false;
+      for (const c of WATCH[eventName].cfgs) {
+        if (previous[c.id]) {
+          const { since, ...rest } = previous[c.id];
+          status[c.id] = rest;
+        }
+      }
     }
   }
+  if (saveStatus('status/resale.json', status)) console.log('status/resale.json updated');
 
   if (EVENTS.length === 0) summaryLines.push('No active watches right now.');
 

@@ -13,6 +13,8 @@ on:
         description: 'How long to keep checking (0 = one check, for testing)'
         default: '180'
  
+permissions:
+  contents: write   # status/shop.json is committed when a ticket's status changes
 concurrency:
   group: hyrox-watch
   cancel-in-progress: false
@@ -31,9 +33,13 @@ jobs:
       - name: Install deps
         run: npm install --no-audit --no-fund
  
+      - name: Allow git in the container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Check official shop
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          COMMIT_STATUS: '1'
           LOOP_MINUTES: ${{ inputs.loop_minutes || '180' }}
           INTERVAL_MINUTES: '10'
         run: node shop-watch.js

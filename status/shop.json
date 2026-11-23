@@ -1,0 +1,37 @@
+{
+  "ottawa-2027-singles-open-men": {
+    "days": [
+      {
+        "day": "Wednesday",
+        "buyable": false,
+        "price": null
+      },
+      {
+        "day": "Thursday",
+        "buyable": false,
+        "price": null
+      },
+      {
+        "day": "Friday",
+        "buyable": false,
+        "price": null
+      },
+      {
+        "day": "Saturday",
+        "buyable": false,
+        "price": null
+      }
+    ],
+    "since": "2026-11-23T03:43:24.280Z"
+  },
+  "ottawa-2027-singles-pro-men": {
+    "days": [
+      {
+        "day": "Friday",
+        "buyable": false,
+        "price": null
+      }
+    ],
+    "since": "2026-11-23T03:43:24.280Z"
+  }
+}

@@ -12,10 +12,10 @@
  * that arrived in the meantime.
  *
  * Divisions are { type: Singles|Doubles|Relay, class: Open|Pro, gender:
- * Men|Women|Mixed } (Relay has no class). Singles ticket and category names are
- * confirmed from real shop and Hybrid Tickets data; Doubles and Relay names are
- * best guesses, so a wrong guess shows up as a "can't find tickets" alert on
- * the shop and a "possible listing" alert on resale rather than silence.
+ * Men|Women|Mixed } (Relay has no class). Shop ticket names for every division
+ * are confirmed from the Ottawa shop's data (23 Nov 2026). Hybrid Tickets names
+ * are confirmed for Singles only; Doubles and Relay are best guesses, so a
+ * wrong guess shows up as a "possible listing" alert rather than silence.
  */
 
 import { readFileSync } from 'fs';
@@ -54,26 +54,37 @@ export function combinedLabel(divisions) {
 
 // ---------- official shop ----------
 
-// Confirmed ticket names on the ca/usa shop. Charity and adaptive tickets are
-// left out on purpose (see shop-watch.js).
+// Ticket names on the shop, from the Ottawa shop's data (23 Nov 2026). Charity,
+// adaptive, and partner add-on tickets ("... ATHLETE 2", "... TEAM MEMBER") are
+// left out on purpose (see shop-watch.js). Exact names also stop a division
+// switch from reading the previous division's list while the page redraws.
 const SHOP_NAMES = {
   'Singles/Open/Men': /^HYROX MEN \|/i,
   'Singles/Pro/Men': /^HYROX PRO MEN \|/i,
   'Singles/Open/Women': /^HYROX WOMEN \|/i,
   'Singles/Pro/Women': /^HYROX PRO WOMEN \|/i,
+  'Doubles/Open/Men': /^HYROX DOUBLES MEN \|/i,
+  'Doubles/Open/Women': /^HYROX DOUBLES WOMEN \|/i,
+  'Doubles/Open/Mixed': /^HYROX DOUBLES MIXED \|/i,
+  'Doubles/Pro/Men': /^HYROX PRO DOUBLES MEN \|/i,
+  'Doubles/Pro/Women': /^HYROX PRO DOUBLES WOMEN \|/i,
+  'Relay/Men': /^HYROX MENS RELAY \|/i,
+  'Relay/Women': /^HYROX WOMENS RELAY \|/i,
+  'Relay/Mixed': /^HYROX MIXED RELAY \|/i,
 };
 const NOT_CHARITY_OR_ADAPTIVE = /^(?!.*(charity|adaptive)).*/i;
 
-// One shop check per watch: { label, shop, drill, name }. Races with no
+// One shop check per watch: { id, label, shop, drill, name }. Races with no
 // athlete ticket link yet (shop: null) are skipped; resale still covers them.
 export function shopChecks(active) {
   return active.filter((w) => w.race.shop).map((w) => {
     const d = w.division;
     return {
+      id: w.id,
       label: `${w.race.city} ${divisionLabel(d)}`,
       shop: w.race.shop,
       drill: isRelay(d) ? [d.type, d.gender] : [d.type, d.class, d.gender],
-      name: SHOP_NAMES[`${d.type}/${d.class}/${d.gender}`] || NOT_CHARITY_OR_ADAPTIVE,
+      name: SHOP_NAMES[isRelay(d) ? `${d.type}/${d.gender}` : `${d.type}/${d.class}/${d.gender}`] || NOT_CHARITY_OR_ADAPTIVE,
     };
   });
 }
@@ -107,7 +118,8 @@ export function resaleCfg(d) {
 }
 
 // One resale entry per race, keyed by its Hybrid Tickets event name:
-// { Ottawa: { label, cfgs: [{ target, fallback, exclude, from, to }] } }.
+// { Ottawa: { label, cfgs: [{ id, target, fallback, exclude, from, to }] } },
+// where `id` is the watch the division came from.
 // `from`/`to` limit race days; null means any day.
 export function resaleEvents(active) {
   const out = {};
@@ -115,7 +127,7 @@ export function resaleEvents(active) {
     const key = w.race.resale;
     out[key] ??= { label: '', divisions: [], cfgs: [] };
     out[key].divisions.push(w.division);
-    out[key].cfgs.push({ ...resaleCfg(w.division), from: w.from ?? null, to: w.to ?? null });
+    out[key].cfgs.push({ id: w.id, ...resaleCfg(w.division), from: w.from ?? null, to: w.to ?? null });
   }
   for (const e of Object.values(out)) e.label = combinedLabel(e.divisions);
   return out;
