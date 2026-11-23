@@ -64,9 +64,10 @@ const SHOP_NAMES = {
 };
 const NOT_CHARITY_OR_ADAPTIVE = /^(?!.*(charity|adaptive)).*/i;
 
-// One shop check per watch: { label, shop, drill, name }.
+// One shop check per watch: { label, shop, drill, name }. Races with no
+// athlete ticket link yet (shop: null) are skipped; resale still covers them.
 export function shopChecks(active) {
-  return active.map((w) => {
+  return active.filter((w) => w.race.shop).map((w) => {
     const d = w.division;
     return {
       label: `${w.race.city} ${divisionLabel(d)}`,
