@@ -27,6 +27,20 @@
         "Ben B."
       ],
       "created": "2026-11-23"
+    },
+    {
+      "id": "vancouver-2026-singles-open-women",
+      "event": "vancouver-2026",
+      "division": {
+        "type": "Singles",
+        "class": "Open",
+        "gender": "Women"
+      },
+      "status": "pending",
+      "requested_by": [
+        "Ben B."
+      ],
+      "created": "2026-11-23"
     }
   ]
 }
