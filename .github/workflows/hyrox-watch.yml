@@ -2,6 +2,8 @@ name: hyrox-watch
  
 on:
   schedule:
+    # Each run starts the next when it finishes a full loop (chain.js); this
+    # schedule is the backup that restarts things if the chain stops.
     # GitHub only fires schedules every few hours lately, so each run keeps
     # checking every 10 min for 3 hours (LOOP_MINUTES). A trigger that arrives
     # while a run is going waits in the queue and starts when it ends. Odd
@@ -15,6 +17,7 @@ on:
  
 permissions:
   contents: write   # status/shop.json is committed when a ticket's status changes
+  actions: write    # chain.js starts the next run
 concurrency:
   group: hyrox-watch
   cancel-in-progress: false
@@ -43,3 +46,9 @@ jobs:
           LOOP_MINUTES: ${{ inputs.loop_minutes || '180' }}
           INTERVAL_MINUTES: '10'
         run: node shop-watch.js
+
+      - name: Start the next run
+        if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node chain.js hyrox-watch.yml
