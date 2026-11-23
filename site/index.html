@@ -108,6 +108,9 @@
 const DATA = 'https://raw.githubusercontent.com/brodeurbenjamin/tickets/main/';
 const CONTINENTS = { 'north-america': 'North America', 'europe': 'Europe', 'asia-pacific': 'Asia-Pacific', 'south-america': 'South America', 'africa': 'Africa' };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+// Hybrid Tickets has no public listings page (they're in the app, after login),
+// so the resale link goes to its home page, which offers the app.
+const RESALE_URL = 'https://roxtickets.app/';
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const $ = (id) => document.getElementById(id);
@@ -172,7 +175,7 @@ function watchHtml(w, race, shop, resale) {
   const seen = [shop?.since, resale?.since].filter(Boolean).sort().pop();
   return `<div class="watch">${head}
     <div class="row line"><span class="lbl">Official shop</span>${shopLine}${shopLink}</div>
-    <div class="row line"><span class="lbl">Resale</span>${resaleLine}</div>
+    <div class="row line"><span class="lbl">Resale</span>${resaleLine} <a class="pill" href="${RESALE_URL}" target="_blank" rel="noopener">Open Hybrid Tickets ↗</a></div>
     ${seen ? `<p class="note">Last change ${esc(ago(seen))}</p>` : ''}</div>`;
 }
 
