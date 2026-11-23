@@ -215,15 +215,25 @@ function page_(text) {
     '</p><p><a href="https://hybridbyben.com/tickets/">Open hybridbyben.com/tickets</a></p></div>').setTitle('Ticket Watch');
 }
 
-// ntfy headers must be plain ASCII.
+// ntfy headers must be plain ASCII. ntfy.sh limits requests per internet
+// address, and Apps Script shares addresses with other people's scripts, so a
+// 429 ("too many requests") can happen for no fault of ours: wait and retry,
+// up to 3 tries (seen on 23 Nov 2026, approval request lost).
 function notify_(topicProperty, n) {
   const topic = PropertiesService.getScriptProperties().getProperty(topicProperty);
   if (!topic) return console.warn('No ' + topicProperty + ' set; skipped: ' + n.title);
   const ascii = s => String(s).replace(/[’‘]/g, "'").replace(/[^\x20-\x7E]/g, '?');
   const headers = { Title: ascii(n.title), Priority: n.priority || 'default' };
   if (n.actions) headers.Actions = n.actions;
-  const res = UrlFetchApp.fetch('https://ntfy.sh/' + topic, { method: 'post', payload: n.body, headers, muteHttpExceptions: true });
-  if (res.getResponseCode() !== 200) console.warn('ntfy responded ' + res.getResponseCode());
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const res = UrlFetchApp.fetch('https://ntfy.sh/' + topic, { method: 'post', payload: n.body, headers, muteHttpExceptions: true });
+    const code = res.getResponseCode();
+    if (code === 200) return true;
+    console.warn(`ntfy responded ${code} (try ${attempt} of 3): ${n.title}`);
+    if (code !== 429 && code < 500) return false;   // a 4xx other than 429 won't fix itself
+    if (attempt < 3) Utilities.sleep(10000 * attempt);
+  }
+  return false;
 }
 
 // ---------- GitHub ----------
