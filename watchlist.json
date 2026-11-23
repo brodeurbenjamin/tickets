@@ -27,6 +27,20 @@
         "Ben B."
       ],
       "created": "2026-11-23"
+    },
+    {
+      "id": "vancouver-2026-singles-pro-men",
+      "event": "vancouver-2026",
+      "division": {
+        "type": "Singles",
+        "class": "Pro",
+        "gender": "Men"
+      },
+      "status": "pending",
+      "requested_by": [
+        "Nick C."
+      ],
+      "created": "2026-11-23"
     }
   ]
 }
