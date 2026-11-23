@@ -1,9 +1,9 @@
 name: events-update
 on:
   schedule:
-    # Weekly, Mondays 06:47 UTC: refresh events.json from hyrox.com and drop
-    # watches for finished races (events-update.js). A few minutes per run.
-    - cron: '47 6 * * 1'
+    # Daily 06:47 UTC: refresh events.json from hyrox.com and drop watches for
+    # finished races (events-update.js). At most ~16 requests, a few minutes.
+    - cron: '47 6 * * *'
   workflow_dispatch:
 permissions:
   contents: write

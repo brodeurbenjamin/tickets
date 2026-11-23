@@ -1,5 +1,5 @@
 /**
- * events-update — weekly refresh of events.json from hyrox.com, plus cleanup.
+ * events-update — daily refresh of events.json from hyrox.com, plus cleanup.
  *
  * Source (checked 23 Nov 2026):
  *   https://hyrox.com/find-my-race/ lists every race as a WordPress card
@@ -15,8 +15,8 @@
  * every 6 s once triggered), so race pages are only fetched for races still
  * missing a shop link: watched races first, then soonest first, a few seconds
  * apart, retrying after a 429. A run stops fetching race pages after
- * PAGE_BUDGET_MS, or as soon as one is still refused after its retries; the
- * rest are picked up by the next run.
+ * MAX_PAGES pages or PAGE_BUDGET_MS, or as soon as one is still refused after
+ * its retries; the rest are picked up by the next (daily) run.
  *
  * What it changes:
  *   events.json    adds new races; fills in a missing shop link; updates names
@@ -37,6 +37,7 @@ const MIN_RACES = 20; // fewer than this means the page layout changed
 const PAGE_GAP_MS = Number(process.env.PAGE_GAP_MS ?? 5000);
 const RETRY_MS = Number(process.env.RETRY_MS ?? 30000); // first wait after a 429; doubles, then triples
 const PAGE_BUDGET_MS = Number(process.env.PAGE_BUDGET_MS ?? 15 * 60000);
+const MAX_PAGES = Number(process.env.MAX_PAGES ?? 15); // per run; keeps a daily run well under the rate limit
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36';
 
 const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
@@ -178,7 +179,7 @@ async function main() {
   const stopAt = Date.now() + PAGE_BUDGET_MS;
   let fetched = 0;
   for (const e of needShop) {
-    if (Date.now() > stopAt) break;
+    if (Date.now() > stopAt || fetched >= MAX_PAGES) break;
     await new Promise((r) => setTimeout(r, PAGE_GAP_MS));
     try {
       e.shop = shopFromRacePage(await get(e.page));
