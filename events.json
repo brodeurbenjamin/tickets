@@ -1,0 +1,12 @@
+{
+  "events": [
+    {
+      "id": "ottawa-2027",
+      "city": "Ottawa",
+      "start": "2027-04-21",
+      "end": "2027-04-25",
+      "shop": "https://ca.hyrox.com/tickets/6adf8ccfd5d2d382e327bf65",
+      "resale": "Ottawa"
+    }
+  ]
+}

@@ -7,8 +7,9 @@
  * can't be bought, that button is `disabled` and shows an "Unavailable" badge.
  * An enabled button means it's buyable.
  *
- * To watch another race or division, add an entry to CHECKS. Earlier targets
- * (Paris, Phoenix) live in this repo's git history.
+ * What to check comes from events.json and watchlist.json (see watchlist.js):
+ * one check per active watch. Earlier hard-coded targets (Paris, Phoenix) live
+ * in this repo's git history.
  *
  * CHARITY tickets (e.g. "CHARITY: RACE FOR IMPACT | HYROX MEN | Friday") are
  * deliberately left out: they need a fundraising pledge and are often on sale
@@ -25,21 +26,7 @@
  */
 
 import { chromium } from 'playwright';
-
-const CHECKS = [
-  {
-    label: "Ottawa Men's Open",
-    shop: 'https://ca.hyrox.com/tickets/6adf8ccfd5d2d382e327bf65',
-    drill: ['Singles', 'Open', 'Men'],
-    name: /^HYROX MEN \|/i, // Wed 21 - Sat 24 Apr 2027
-  },
-  {
-    label: "Ottawa Men's Pro",
-    shop: 'https://ca.hyrox.com/tickets/6adf8ccfd5d2d382e327bf65',
-    drill: ['Singles', 'Pro', 'Men'],
-    name: /^HYROX PRO MEN \|/i, // Fri 23 Apr 2027 only
-  },
-];
+import { loadFiles, activeWatches, shopChecks } from './watchlist.js';
 
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
 if (!NTFY_TOPIC) { console.error('NTFY_TOPIC not set.'); process.exit(1); }
@@ -149,11 +136,11 @@ async function runCheck(browser, check) {
 // Each check gets one retry after a short pause (most failures are a slow
 // page load or a network blip). A check failing twice doesn't stop the others.
 // Returns the labels of checks that failed.
-async function checkAll() {
+async function checkAll(checks) {
   const browser = await chromium.launch();
   const failed = [];
   try {
-    for (const check of CHECKS) {
+    for (const check of checks) {
       try {
         await runCheck(browser, check);
       } catch (first) {
@@ -180,6 +167,23 @@ const LOOP_MINUTES = Number(process.env.LOOP_MINUTES || 0);
 const INTERVAL_MINUTES = Number(process.env.INTERVAL_MINUTES || 10);
 
 async function main() {
+  let checks;
+  try {
+    checks = shopChecks(activeWatches(loadFiles()));
+  } catch (err) {
+    console.log(`::error title=watchlist unreadable::${String(err.message).slice(0, 300)}`);
+    await push({
+      title: 'Ticket watch: watchlist unreadable',
+      body: `events.json or watchlist.json can't be read (${err.message}). Nothing is being checked until it's fixed. Ask Claude to look at it.`,
+      priority: 'high',
+    }).catch(() => {});
+    process.exit(1);
+  }
+  if (checks.length === 0) {
+    console.log('No active watches for upcoming races - nothing to check.');
+    process.exit(0);
+  }
+  console.log(`Watching: ${checks.map((c) => c.label).join(', ')}`);
   const deadline = Date.now() + LOOP_MINUTES * 60000;
   const failing = new Set(); // checks currently in a failure streak (alert once per streak)
   let lastFailed = [];
@@ -187,7 +191,7 @@ async function main() {
   do {
     const started = Date.now();
     console.log(`--- round ${++round} at ${new Date().toISOString()}`);
-    lastFailed = await checkAll();
+    lastFailed = await checkAll(checks);
     for (const f of lastFailed) {
       console.log(`::error title=${f.label} check failed::${f.msg}`);
       if (!failing.has(f.label)) {
