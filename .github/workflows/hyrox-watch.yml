@@ -42,6 +42,7 @@ jobs:
       - name: Check official shop
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_ADMIN_TOPIC: ${{ secrets.NTFY_ADMIN_TOPIC }}
           COMMIT_STATUS: '1'
           LOOP_MINUTES: ${{ inputs.loop_minutes || '180' }}
           INTERVAL_MINUTES: '10'

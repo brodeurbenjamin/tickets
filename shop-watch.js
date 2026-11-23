@@ -38,7 +38,11 @@ import { loadFiles, activeWatches, shopChecks } from './watchlist.js';
 import { saveStatus } from './status.js';
 import { markFullLoop } from './chain.js';
 
+// Ticket alerts go to the community topic; problems (a failing check, the shop
+// page changing, an unreadable watchlist) go to Ben's admin topic, falling
+// back to the community topic if it isn't set, so nothing goes silent.
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
+const NTFY_ADMIN_TOPIC = process.env.NTFY_ADMIN_TOPIC || NTFY_TOPIC;
 if (!NTFY_TOPIC) { console.error('NTFY_TOPIC not set.'); process.exit(1); }
 
 function asciiHeader(s) {
@@ -49,10 +53,10 @@ function asciiHeader(s) {
     .replace(/[^\x20-\x7E]/g, '?');
 }
 
-async function push({ title, body, priority = 'default', click }) {
+async function push({ title, body, priority = 'default', click, admin = false }) {
   const headers = { Title: asciiHeader(title), Priority: priority };
   if (click) headers.Click = click;
-  const res = await fetch(`https://ntfy.sh/${NTFY_TOPIC}`, { method: 'POST', headers, body });
+  const res = await fetch(`https://ntfy.sh/${admin ? NTFY_ADMIN_TOPIC : NTFY_TOPIC}`, { method: 'POST', headers, body });
   if (!res.ok) console.error(`ntfy responded ${res.status}`);
 }
 
@@ -208,6 +212,7 @@ async function runShop(browser, shop, checks) {
           title: `${check.label}: can't find tickets`,
           body: `The shop page has changed, so this check can't see the tickets any more. Ask Claude to update it.`,
           priority: 'high',
+          admin: true,
           click: check.shop,
         });
         console.log('  notification sent (structure changed)');
@@ -281,6 +286,7 @@ async function main() {
       title: 'Ticket watch: watchlist unreadable',
       body: `events.json or watchlist.json can't be read (${err.message}). Nothing is being checked until it's fixed. Ask Claude to look at it.`,
       priority: 'high',
+      admin: true,
     }).catch(() => {});
     process.exit(1);
   }
@@ -314,6 +320,7 @@ async function main() {
           title: `${f.label}: check failing`,
           body: `Couldn't check the official shop (${f.msg}). It will keep retrying; you'll only hear about it again if it starts failing after recovering.`,
           priority: 'high',
+          admin: true,
         }).catch(() => {});
       }
     }
