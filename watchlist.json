@@ -1,0 +1,20 @@
+{
+  "watches": [
+    {
+      "id": "ottawa-2027-singles-open-men",
+      "event": "ottawa-2027",
+      "division": { "type": "Singles", "class": "Open", "gender": "Men" },
+      "status": "active",
+      "requested_by": ["Ben B."],
+      "created": "2026-11-23"
+    },
+    {
+      "id": "ottawa-2027-singles-pro-men",
+      "event": "ottawa-2027",
+      "division": { "type": "Singles", "class": "Pro", "gender": "Men" },
+      "status": "active",
+      "requested_by": ["Ben B."],
+      "created": "2026-11-23"
+    }
+  ]
+}

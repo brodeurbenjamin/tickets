@@ -5,7 +5,7 @@ on:
     # GitHub only fires schedules every few hours lately, so each run keeps
     # checking every 10 min for 3 hours (LOOP_MINUTES). A trigger that arrives
     # while a run is going waits in the queue and starts when it ends. Odd
-    # minutes avoid the busy top-of-the-hour slots. Targets: shop-watch.js.
+    # minutes avoid the busy top-of-the-hour slots. Targets: watchlist.json.
     - cron: '7,17,27,37,47,57 * * * *'
   workflow_dispatch:
     inputs:

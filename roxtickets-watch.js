@@ -10,8 +10,10 @@
  * Each entry in `ticketData` is one individual seller's listing (this is a
  * peer marketplace, not an inventory feed) with category, price, and status.
  *
- * TARGETS (22 Nov 2026), configured per event in WATCH below:
- *   Ottawa — Men's Open or Men's Pro, any day.
+ * TARGETS come from events.json and watchlist.json (see watchlist.js): one
+ * entry per race, keyed by its Hybrid Tickets event name, with category
+ * patterns for each watched division. With no active watch, a run sends the
+ * daily check-in if due and stops.
  *
  * Category naming seen in real data: "Mens Pro", "Mens Open", "Mixed
  * Doubles", and for women "Women Open" (no s; seen in state.json 13 Oct).
@@ -49,23 +51,16 @@
  *      you get a positive "still alive" signal without 144 pings a day.
  */
 
-// What to watch per event. `target` = urgent alert; `fallback` (minus
-// `exclude`) = "possible" alert; `from`/`to` = race-day window (null = any day).
-const WATCH = {
-  // Event name "Ottawa" is assumed from how Nashville/Dallas were named; check
-  // the daily heartbeat lists Ottawa with a sensible count once listings exist.
-  // "Mens Open" and "Mens Pro" are confirmed category names from real data.
-  Ottawa: {
-    label: "Men's Open/Pro",
-    target: /^men'?s? (open|pro)$/i,
-    fallback: /\bmen'?s?\b.*\b(open|pro)\b|\b(open|pro)\b.*\bmen'?s?\b/i,
-    exclude: /wom[ae]n|double|relay|mixed|adaptive|team|corporate/i,
-    from: null, // any race day (Ottawa runs 21-25 Apr 2027)
-    to: null,
-  },
-  // Past targets (Paris Women's Open/Pro, Phoenix Men's Relay) are in git history.
-};
-const EVENTS = Object.keys(WATCH);
+import { loadFiles, activeWatches, resaleEvents } from './watchlist.js';
+
+// What to watch per event, from watchlist.js. Each of an event's `cfgs` is one
+// division: `target` = urgent alert; `fallback` (minus `exclude`) = "possible"
+// alert; `from`/`to` = race-day window (null = any day). Event names such as
+// "Ottawa" are assumed from how Nashville/Dallas were named; check the daily
+// heartbeat lists each event with a sensible count once listings exist.
+// Past hard-coded targets (Paris, Phoenix) are in git history.
+// Loaded below, once push() exists to report an unreadable file.
+let WATCH, EVENTS;
 
 // "19-11-2026 THU" -> "2026-11-19"; null if unreadable.
 export function listingDate(t) {
@@ -94,6 +89,18 @@ export function classify(available, cfg) {
     confirmed: confirmed.filter((t) => inWindow(t, cfg)),
     fallback: fallback.filter((t) => inWindow(t, cfg)),
     outOfWindow: [...confirmed, ...fallback].filter((t) => !inWindow(t, cfg)),
+  };
+}
+// classify() for every watched division of one event, merged. A listing that
+// is an exact match for one division is never also a "possible" for another.
+export function classifyEvent(available, ev) {
+  const parts = ev.cfgs.map((cfg) => classify(available, cfg));
+  const uniq = (list) => [...new Set(list)];
+  const confirmed = uniq(parts.flatMap((p) => p.confirmed));
+  return {
+    confirmed,
+    fallback: uniq(parts.flatMap((p) => p.fallback)).filter((t) => !confirmed.includes(t)),
+    outOfWindow: uniq(parts.flatMap((p) => p.outOfWindow)),
   };
 }
 
@@ -171,6 +178,19 @@ function categoryBreakdown(listings) {
     .join(', ');
 }
 
+try {
+  WATCH = resaleEvents(activeWatches(loadFiles()));
+  EVENTS = Object.keys(WATCH);
+} catch (err) {
+  console.log(`::error title=watchlist unreadable::${String(err.message).slice(0, 300)}`);
+  await push({
+    title: 'Ticket watch: watchlist unreadable',
+    body: `events.json or watchlist.json can't be read (${err.message}). Nothing is being checked until it's fixed. Ask Claude to look at it.`,
+    priority: 'high',
+  }).catch(() => {});
+  process.exit(1);
+}
+
 const state = await readState();
 if (!state.events) state.events = {};
 // Drop events no longer watched (e.g. old Nashville entry) so the heartbeat
@@ -192,10 +212,10 @@ async function checkOnce() {
       const available = listings.filter((t) => t.available_for === 'available');
 
       const cfg = WATCH[eventName];
-      const { confirmed, fallback: fallbackOnly, outOfWindow } = classify(available, cfg);
+      const { confirmed, fallback: fallbackOnly, outOfWindow } = classifyEvent(available, cfg);
 
       console.log(
-        `${eventName}: ${available.length} available listing(s) total, ${confirmed.length} ${cfg.label}${cfg.from ? ' in trip window' : ''}, ${fallbackOnly.length} fallback match, ${outOfWindow.length} target-division outside window`
+        `${eventName}: ${available.length} available listing(s) total, ${confirmed.length} ${cfg.label}${cfg.cfgs.some((c) => c.from) ? ' in trip window' : ''}, ${fallbackOnly.length} fallback match, ${outOfWindow.length} target-division outside window`
       );
 
       // Full dump for visibility — every listing regardless of category. Log only,
@@ -284,6 +304,8 @@ async function checkOnce() {
     }
   }
 
+  if (EVENTS.length === 0) summaryLines.push('No active watches right now.');
+
   // Daily heartbeat — once per UTC calendar day, regardless of activity.
   // This is the "yes, it's still running" signal. A missing heartbeat for a
   // day means something broke — check the Actions tab.
@@ -307,7 +329,9 @@ async function checkOnce() {
 // state.json is written every round and committed by the workflow at the end.
 const LOOP_MINUTES = Number(process.env.LOOP_MINUTES || 0);
 const INTERVAL_MINUTES = Number(process.env.INTERVAL_MINUTES || 5);
-const deadline = Date.now() + LOOP_MINUTES * 60000;
+// No active watch: one round (for the daily check-in), then stop.
+const deadline = EVENTS.length ? Date.now() + LOOP_MINUTES * 60000 : 0;
+if (!EVENTS.length) console.log('No active watches for upcoming races - check-in only.');
 let lastOk = true;
 let round = 0;
 do {
