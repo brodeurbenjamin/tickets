@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Ticket Watch · Hybrid_by_Ben</title>
+<meta name="description" content="Ask for a HYROX race and division to be watched, and get an alert when tickets come up.">
+<style>
+  :root {
+    --bg:#f6f7f9; --card:#fff; --text:#16181d; --muted:#6a7280; --line:#e3e6eb;
+    --accent:#e4572e; --good:#14804a; --good-bg:#e3f4ea; --bad:#c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0e1116; --card:#171b22; --text:#eef0f3; --muted:#8e97a6; --line:#262c36;
+            --accent:#ff7a50; --good:#4cc38a; --good-bg:#15291f; --bad:#ff6b5e; }
+  }
+  * { box-sizing:border-box } [hidden] { display:none !important }
+  body { margin:0; background:var(--bg); color:var(--text);
+         font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
+  .wrap { max-width:820px; margin:0 auto; padding:20px 16px 60px }
+  .crumb { font-size:13px; margin:0 0 12px } .crumb a { color:var(--muted); text-decoration:none }
+  h1 { font-size:24px; margin:0 0 2px } h2 { font-size:16px; margin:0 0 12px }
+  .sub { color:var(--muted); margin:0 0 20px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:16px; margin-bottom:16px }
+  .watch { border-top:1px solid var(--line); padding:12px 0 }
+  .watch:first-of-type { border-top:0; padding-top:0 }
+  .watch h3 { font-size:15px; margin:0 } .meta { color:var(--muted); font-size:13px; margin:2px 0 8px }
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center }
+  .lbl { font-size:12px; color:var(--muted); min-width:92px }
+  .pill { font-size:12px; border:1px solid var(--line); border-radius:999px; padding:2px 9px; white-space:nowrap }
+  .pill.buy { background:var(--good-bg); color:var(--good); border-color:var(--good); font-weight:600 }
+  .pill.off { color:var(--muted) }
+  a.pill { color:var(--accent); border-color:var(--accent); text-decoration:none; font-weight:600 }
+  .line { margin-top:6px }
+  label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px }
+  select, input { display:block; width:100%; min-width:0; height:44px; margin:0; padding:0 10px;
+                  border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text);
+                  font:inherit; font-size:16px /* 16px stops iPhone zooming in */ }
+  .grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)) }
+  .grid > div { min-width:0 } .full { grid-column:1/-1 }
+  button { padding:11px 18px; border:0; border-radius:8px; background:var(--accent);
+           color:#fff; font:inherit; font-weight:600; cursor:pointer }
+  button:disabled { opacity:.5; cursor:not-allowed }
+  :focus-visible { outline:2px solid var(--accent); outline-offset:2px }
+  .note { color:var(--muted); font-size:13px; margin:8px 0 0 }
+  .empty { color:var(--muted); margin:0 }
+  .err { color:var(--bad) }
+  code { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px; font-size:13px; word-break:break-all }
+  ol { margin:0; padding-left:20px } li { margin:4px 0 }
+  footer { color:var(--muted); font-size:12px; text-align:center; margin-top:28px }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="crumb"><a href="/">← Hybrid_by_Ben</a></p>
+  <h1>Ticket Watch</h1>
+  <p class="sub">Sold out of a HYROX race? Ask for it to be watched. When a ticket comes up on the official shop or on Hybrid Tickets resale, everyone subscribed gets an alert.</p>
+
+  <div class="card">
+    <h2>Being watched</h2>
+    <div id="watches"><p class="empty">Loading…</p></div>
+  </div>
+
+  <div class="card" id="pendingCard" hidden>
+    <h2>Waiting for approval</h2>
+    <div id="pending"></div>
+  </div>
+
+  <div class="card">
+    <h2>Request a watch</h2>
+    <form id="req" novalidate>
+      <div class="grid">
+        <div class="full"><label for="race">Race</label><select id="race" required></select></div>
+        <div><label for="type">Division</label>
+          <select id="type"><option>Singles</option><option>Doubles</option><option>Relay</option></select></div>
+        <div id="classBox"><label for="class">Class</label>
+          <select id="class"><option>Open</option><option>Pro</option></select></div>
+        <div><label for="gender">Category</label>
+          <select id="gender"><option>Men</option><option>Women</option><option>Mixed</option></select></div>
+        <div><label for="name">First name + initial</label>
+          <input id="name" autocomplete="given-name" placeholder="e.g. Sam K." maxlength="40"></div>
+      </div>
+      <p class="note" id="already" hidden></p>
+      <p style="margin:14px 0 0"><button type="submit" id="send" disabled>Request this watch</button></p>
+      <p class="note">Requests open soon. Each request is approved by Ben before it's watched. Your first name and initial are shown on this page and in alerts.</p>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Get the alerts</h2>
+    <ol>
+      <li>Install the free <strong>ntfy</strong> app (iPhone or Android).</li>
+      <li>Tap <strong>+</strong> and subscribe to <code id="topic">alerts-hybridbyben-k7q2m9x4</code>, server <code>ntfy.sh</code>.</li>
+      <li>Turn on notifications. Ticket alerts are urgent, so they ring even when your phone is quiet.</li>
+    </ol>
+    <p class="note">Alerts are for everyone subscribed, for every watched race. Tickets go fast: open the alert and buy straight away.</p>
+  </div>
+
+  <footer>© 2026 Hybrid_by_Ben. All rights reserved.</footer>
+</div>
+
+<script>
+// Data is read straight from the repo on each visit, so the page is current
+// without republishing: races (events.json, refreshed daily), watches
+// (watchlist.json) and what the watchers last saw (status/*.json).
+const DATA = 'https://raw.githubusercontent.com/brodeurbenjamin/tickets/main/';
+const CONTINENTS = { 'north-america': 'North America', 'europe': 'Europe', 'asia-pacific': 'Asia-Pacific', 'south-america': 'South America', 'africa': 'Africa' };
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const ymd = (s) => new Date(s + 'T12:00:00Z');
+
+async function load(path, fallback) {
+  try {
+    const res = await fetch(DATA + path + '?t=' + Date.now(), { cache: 'no-store' });
+    return res.ok ? await res.json() : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+// "2027-04-21", "2027-04-25" -> "21–25 Apr 2027" (or "28 Apr – 2 May 2027")
+function dateRange(a, b) {
+  const s = ymd(a), e = ymd(b);
+  const d = (x) => x.getUTCDate(), m = (x) => MONTHS[x.getUTCMonth()];
+  if (a === b) return `${d(s)} ${m(s)} ${s.getUTCFullYear()}`;
+  if (m(s) === m(e)) return `${d(s)}–${d(e)} ${m(e)} ${e.getUTCFullYear()}`;
+  return `${d(s)} ${m(s)} – ${d(e)} ${m(e)} ${e.getUTCFullYear()}`;
+}
+
+// The shop shows a weekday ("Friday"); turn it into the race's date ("Fri 23 Apr").
+function dayDate(weekday, race) {
+  const want = DAYS.findIndex((d) => String(weekday).toLowerCase().startsWith(d.toLowerCase().slice(0, 3)));
+  for (let t = ymd(race.start); t <= ymd(race.end); t = new Date(t.getTime() + 864e5)) {
+    if (t.getUTCDay() === want) return `${DAYS[want].slice(0, 3)} ${t.getUTCDate()} ${MONTHS[t.getUTCMonth()]}`;
+  }
+  return weekday;
+}
+
+function divisionLabel(d) {
+  const who = d.gender === 'Mixed' ? 'Mixed' : `${d.gender}'s`;
+  if (d.type === 'Relay') return `${who} Relay`;
+  if (d.type === 'Singles') return `${who} ${d.class}`;
+  return `${who} ${d.class === 'Pro' ? 'Pro ' : ''}Doubles`;
+}
+
+function ago(iso) {
+  const min = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (!(min >= 0)) return '';
+  if (min < 60) return `${min} min ago`;
+  if (min < 48 * 60) return `${Math.round(min / 60)} h ago`;
+  return `${Math.round(min / 1440)} days ago`;
+}
+
+function watchHtml(w, race, shop, resale) {
+  const head = `<h3>${esc(race.city)} · ${esc(divisionLabel(w.division))}</h3>
+    <p class="meta">${esc(dateRange(race.start, race.end))} · asked by ${esc((w.requested_by || []).join(', '))}</p>`;
+  let shopLine;
+  if (!race.shop) shopLine = `<span class="pill off">Not on sale yet</span>`;
+  else if (!shop) shopLine = `<span class="pill off">Not checked yet</span>`;
+  else if (!shop.days.length) shopLine = `<span class="pill off">No tickets listed</span>`;
+  else shopLine = shop.days.map((d) => `<span class="pill ${d.buyable ? 'buy' : 'off'}">${esc(dayDate(d.day, race))}${d.buyable ? ' · on sale' : ' · sold out'}</span>`).join('');
+  const shopLink = race.shop ? ` <a class="pill" href="${esc(race.shop)}" target="_blank" rel="noopener">Open shop ↗</a>` : '';
+  let resaleLine = `<span class="pill off">${resale ? 'No listings' : 'Not checked yet'}</span>`;
+  if (resale && resale.listings.length) {
+    resaleLine = resale.listings.map((l) => `<span class="pill buy">${esc(l.day)} · $${esc(l.price)}</span>`).join('');
+  }
+  const seen = [shop?.since, resale?.since].filter(Boolean).sort().pop();
+  return `<div class="watch">${head}
+    <div class="row line"><span class="lbl">Official shop</span>${shopLine}${shopLink}</div>
+    <div class="row line"><span class="lbl">Resale</span>${resaleLine}</div>
+    ${seen ? `<p class="note">Last change ${esc(ago(seen))}</p>` : ''}</div>`;
+}
+
+function fillRaces(events, today) {
+  const sel = $('race');
+  sel.innerHTML = '<option value="">Choose a race…</option>';
+  const upcoming = events.filter((e) => e.end >= today);
+  for (const [key, name] of Object.entries(CONTINENTS)) {
+    const list = upcoming.filter((e) => e.continent === key);
+    if (!list.length) continue;
+    const g = document.createElement('optgroup');
+    g.label = name;
+    for (const e of list) {
+      const o = document.createElement('option');
+      o.value = e.id;
+      o.textContent = `${e.city} · ${dateRange(e.start, e.end)}`;
+      g.appendChild(o);
+    }
+    sel.appendChild(g);
+  }
+}
+
+// Only real HYROX divisions: Relay has no class, Pro Doubles has no Mixed,
+// Singles has no Mixed.
+function syncDivision() {
+  const type = $('type').value;
+  $('classBox').hidden = type === 'Relay';
+  const mixedOk = type === 'Relay' || (type === 'Doubles' && $('class').value === 'Open');
+  $('gender').options[2].disabled = !mixedOk; // Men, Women, Mixed
+  if (!mixedOk && $('gender').value === 'Mixed') $('gender').value = 'Men';
+}
+
+function chosenDivision() {
+  const d = { type: $('type').value, gender: $('gender').value };
+  if (d.type !== 'Relay') d.class = $('class').value;
+  return d;
+}
+
+const sameDivision = (a, b) => a.type === b.type && a.gender === b.gender && (a.type === 'Relay' || a.class === b.class);
+
+async function main() {
+  const today = new Date().toISOString().slice(0, 10);
+  const [ev, wl, shop, resale] = await Promise.all([
+    load('events.json', null), load('watchlist.json', null),
+    load('status/shop.json', {}), load('status/resale.json', {}),
+  ]);
+  if (!ev || !wl) {
+    $('watches').innerHTML = `<p class="err">Couldn't load the watch list. Refresh the page to try again.</p>`;
+    return;
+  }
+  const races = Object.fromEntries(ev.events.map((e) => [e.id, e]));
+  const live = wl.watches.filter((w) => races[w.event] && races[w.event].end >= today);
+  const byDate = (a, b) => races[a.event].start.localeCompare(races[b.event].start);
+
+  const active = live.filter((w) => w.status === 'active').sort(byDate);
+  $('watches').innerHTML = active.length
+    ? active.map((w) => watchHtml(w, races[w.event], shop[w.id], resale[w.id])).join('')
+    : '<p class="empty">Nothing is being watched right now.</p>';
+
+  const pending = live.filter((w) => w.status === 'pending').sort(byDate);
+  $('pendingCard').hidden = !pending.length;
+  $('pending').innerHTML = pending.map((w) => {
+    const r = races[w.event];
+    return `<div class="watch"><h3>${esc(r.city)} · ${esc(divisionLabel(w.division))}</h3>
+      <p class="meta">${esc(dateRange(r.start, r.end))} · asked by ${esc((w.requested_by || []).join(', '))}</p></div>`;
+  }).join('');
+
+  fillRaces(ev.events, today);
+  // Say so when the chosen race and division is already watched or waiting.
+  const check = () => {
+    syncDivision();
+    const d = chosenDivision();
+    const hit = live.find((w) => w.event === $('race').value && sameDivision(w.division, d));
+    $('already').hidden = !hit;
+    if (hit) $('already').textContent = hit.status === 'active'
+      ? 'This is already being watched. Subscribe to the alerts below to hear about it.'
+      : 'This is already waiting for approval. Requesting it again adds your name.';
+  };
+  for (const id of ['race', 'type', 'class', 'gender']) $(id).addEventListener('change', check);
+  check();
+  $('req').addEventListener('submit', (e) => e.preventDefault()); // connected in plan step 5
+}
+
+main();
+</script>
+</body>
+</html>
