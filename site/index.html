@@ -46,7 +46,7 @@
   :focus-visible { outline:2px solid var(--accent); outline-offset:2px }
   .note { color:var(--muted); font-size:13px; margin:8px 0 0 }
   .empty { color:var(--muted); margin:0 }
-  .err { color:var(--bad) }
+  .err { color:var(--bad) } .ok { color:var(--good) }
   code { background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px; font-size:13px; word-break:break-all }
   ol { margin:0; padding-left:20px } li { margin:4px 0 }
   footer { color:var(--muted); font-size:12px; text-align:center; margin-top:28px }
@@ -84,7 +84,8 @@
       </div>
       <p class="note" id="already" hidden></p>
       <p style="margin:14px 0 0"><button type="submit" id="send" disabled>Request this watch</button></p>
-      <p class="note">Requests open soon. Each request is approved by Ben before it's watched. Your first name and initial are shown on this page and in alerts.</p>
+      <p class="note" id="msg" role="status"></p>
+      <p class="note"><span id="soon">Requests open soon. </span>Each new watch is approved by Ben before it starts. Your first name and initial are shown on this page and in alerts.</p>
     </form>
   </div>
 
@@ -101,6 +102,7 @@
   <footer>© 2026 Hybrid_by_Ben. All rights reserved.</footer>
 </div>
 
+<script src="config.js"></script>
 <script>
 // Data is read straight from the repo on each visit, so the page is current
 // without republishing: races (events.json, refreshed daily), watches
@@ -256,7 +258,37 @@ async function main() {
   };
   for (const id of ['race', 'type', 'class', 'gender']) $(id).addEventListener('change', check);
   check();
-  $('req').addEventListener('submit', (e) => e.preventDefault()); // connected in plan step 5
+
+  // Requests go to the Google Form (google-form/Code.gs), which checks them,
+  // saves them to watchlist.json and asks Ben to approve new watches.
+  const CFG = window.TICKETS_CONFIG;
+  $('send').disabled = !CFG;
+  $('soon').hidden = !!CFG;
+  $('req').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const say = (cls, t) => { $('msg').className = 'note ' + cls; $('msg').textContent = t; };
+    const name = $('name').value.trim().replace(/\s+/g, ' ');
+    const race = races[$('race').value];
+    const d = chosenDivision();
+    if (!race) return say('err', 'Choose a race.');
+    if (!/^[\p{L}][\p{L} .'-]{1,29}$/u.test(name)) return say('err', 'Enter your first name and initial, e.g. Sam K.');
+    if (!CFG) return;
+    $('send').disabled = true;
+    say('', 'Sending…');
+    try {
+      const E = CFG.ENTRY;
+      // Google Forms sends no CORS headers, so the reply can't be read; a network error still throws.
+      await fetch(CFG.FORM_ACTION, { method: 'POST', mode: 'no-cors', body: new URLSearchParams({
+        [E.race]: race.id, [E.type]: d.type, [E.class]: d.class || '', [E.gender]: d.gender, [E.name]: name }) });
+      const hit = live.find((w) => w.event === race.id && sameDivision(w.division, d));
+      say('ok', hit
+        ? `Thanks ${name}! Your name is added to ${race.city} ${divisionLabel(d)}. It shows here within a few minutes.`
+        : `Thanks ${name}! ${race.city} ${divisionLabel(d)} is sent for approval. It shows under "Waiting for approval" within a few minutes.`);
+    } catch {
+      say('err', "Couldn't send that. Check your connection and try again.");
+    }
+    $('send').disabled = false;
+  });
 }
 
 main();
