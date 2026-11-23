@@ -109,7 +109,11 @@ export function classifyEvent(available, ev) {
 
 const STATE_FILE = './state.json';
 
+// Listing alerts go to the community topic; problems (a failing check, an
+// expired token, an unreadable watchlist) and the daily check-in go to Ben's
+// admin topic, falling back to the community topic if it isn't set.
 const NTFY_TOPIC = process.env.NTFY_TOPIC;
+const NTFY_ADMIN_TOPIC = process.env.NTFY_ADMIN_TOPIC || NTFY_TOPIC;
 const ROX_TOKEN = process.env.ROX_TOKEN;
 
 if (!NTFY_TOPIC) { console.error('NTFY_TOPIC not set.'); process.exit(1); }
@@ -123,8 +127,8 @@ function asciiHeader(s) {
     .replace(/[^\x20-\x7E]/g, '?');
 }
 
-async function push({ title, body, priority = 'default' }) {
-  return fetch(`https://ntfy.sh/${NTFY_TOPIC}`, {
+async function push({ title, body, priority = 'default', admin = false }) {
+  return fetch(`https://ntfy.sh/${admin ? NTFY_ADMIN_TOPIC : NTFY_TOPIC}`, {
     method: 'POST',
     headers: { Title: asciiHeader(title), Priority: priority },
     body,
@@ -190,6 +194,7 @@ try {
     title: 'Ticket watch: watchlist unreadable',
     body: `events.json or watchlist.json can't be read (${err.message}). Nothing is being checked until it's fixed. Ask Claude to look at it.`,
     priority: 'high',
+    admin: true,
   }).catch(() => {});
   process.exit(1);
 }
@@ -312,6 +317,7 @@ async function checkOnce() {
             ? `Hybrid Tickets rejected the login token. Ask Claude how to refresh ROX_TOKEN.`
             : `Couldn't check Hybrid Tickets (${err.message}). It will keep retrying.`,
           priority: 'high',
+          admin: true,
         }).catch(() => {});
       }
       ok = false;
@@ -335,6 +341,7 @@ async function checkOnce() {
       title: 'Ticket watch: running',
       body: `Daily check-in. Hybrid Tickets is checked every ${INTERVAL_MINUTES} min while a run is active.\n${summaryLines.join('\n')}`,
       priority: 'min',
+      admin: true,
     });
     state.lastHeartbeat = today;
     console.log('heartbeat sent');

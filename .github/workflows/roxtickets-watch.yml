@@ -30,6 +30,7 @@ jobs:
       - name: Check listings
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_ADMIN_TOPIC: ${{ secrets.NTFY_ADMIN_TOPIC }}
           ROX_TOKEN: ${{ secrets.ROX_TOKEN }}
           COMMIT_STATUS: '1'   # status/resale.json is committed when listings change
           LOOP_MINUTES: ${{ inputs.loop_minutes || '180' }}
