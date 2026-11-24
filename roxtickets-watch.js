@@ -47,11 +47,13 @@
  *   1. Activity alert — fires once when an event's total available count
  *      CHANGES, not on every run while a listing sits there. Stops the
  *      10-minute-forever spam the Womens Open alert deliberately still does.
- *   2. Daily heartbeat — fires once per UTC day regardless of activity, so
- *      you get a positive "still alive" signal without 144 pings a day.
+ *   2. Daily check-ins — once a day from 8 AM Eastern regardless of
+ *      activity: "running" to the admin topic (a positive "still alive"
+ *      signal without 144 pings a day) and "still watching" to the alerts
+ *      topic. Each is marked sent only once ntfy accepted it.
  */
 
-import { loadFiles, activeWatches, resaleEvents } from './watchlist.js';
+import { loadFiles, activeWatches, resaleEvents, divisionLabel } from './watchlist.js';
 import { saveStatus } from './status.js';
 import { markFullLoop } from './chain.js';
 import { readFileSync } from 'fs';
@@ -63,7 +65,7 @@ import { readFileSync } from 'fs';
 // heartbeat lists each event with a sensible count once listings exist.
 // Past hard-coded targets (Paris, Phoenix) are in git history.
 // Loaded below, once push() exists to report an unreadable file.
-let WATCH, EVENTS;
+let WATCH, EVENTS, WATCHING;
 
 // "19-11-2026 THU" -> "2026-11-19"; null if unreadable.
 export function listingDate(t) {
@@ -127,12 +129,41 @@ function asciiHeader(s) {
     .replace(/[^\x20-\x7E]/g, '?');
 }
 
-async function push({ title, body, priority = 'default', admin = false }) {
-  return fetch(`https://ntfy.sh/${admin ? NTFY_ADMIN_TOPIC : NTFY_TOPIC}`, {
-    method: 'POST',
-    headers: { Title: asciiHeader(title), Priority: priority },
-    body,
-  });
+async function push({ title, body, priority = 'default', admin = false, click }) {
+  const headers = { Title: asciiHeader(title), Priority: priority };
+  if (click) headers.Click = click;
+  return fetch(`https://ntfy.sh/${admin ? NTFY_ADMIN_TOPIC : NTFY_TOPIC}`, { method: 'POST', headers, body });
+}
+
+// push() that checks ntfy accepted the message: retries a 429 ("too many
+// requests") or 5xx after 10 s, then 20 s; true only once ntfy answered 200.
+// Used for the daily check-ins, which are only marked sent when this is true.
+async function pushOk(msg) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    let status;
+    try {
+      status = (await push(msg)).status;
+      if (status === 200) return true;
+    } catch (err) {
+      status = err.message;
+    }
+    console.log(`  ntfy answered ${status} for "${msg.title}" (try ${attempt} of 3)`);
+    if (typeof status === 'number' && status !== 429 && status < 500) return false;
+    if (attempt < 3) await new Promise((r) => setTimeout(r, 10000 * attempt));
+  }
+  return false;
+}
+
+// Daily check-ins go out at 8 AM Eastern (Ben's time, and Ottawa's), not at
+// midnight UTC. Returns that zone's date ("2026-11-24") and hour (0-23).
+const CHECKIN_ZONE = 'America/Toronto';
+const CHECKIN_HOUR = 8;
+export function localNow(now = new Date()) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', { timeZone: CHECKIN_ZONE, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' })
+      .formatToParts(now).map((x) => [x.type, x.value])
+  );
+  return { date: `${p.year}-${p.month}-${p.day}`, hour: Number(p.hour) };
 }
 
 async function fetchListings(eventName) {
@@ -186,8 +217,10 @@ function categoryBreakdown(listings) {
 }
 
 try {
-  WATCH = resaleEvents(activeWatches(loadFiles()));
+  const active = activeWatches(loadFiles());
+  WATCH = resaleEvents(active);
   EVENTS = Object.keys(WATCH);
+  WATCHING = active.map((w) => `${w.race.city} ${divisionLabel(w.division)}`); // for the alerts check-in
 } catch (err) {
   console.log(`::error title=watchlist unreadable::${String(err.message).slice(0, 300)}`);
   await push({
@@ -211,7 +244,6 @@ const failing = new Set(); // events currently in a failure streak
 // Returns true if every event was checked successfully.
 async function checkOnce() {
   let ok = true;
-  const today = new Date().toISOString().slice(0, 10); // UTC date, e.g. "2026-09-16"
   const summaryLines = [];
   // Per watch: exact-match listings (day and price, never the seller). A race
   // whose check fails keeps its last known status.
@@ -333,18 +365,37 @@ async function checkOnce() {
 
   if (EVENTS.length === 0) summaryLines.push('No active watches right now.');
 
-  // Daily heartbeat — once per UTC calendar day, regardless of activity.
-  // This is the "yes, it's still running" signal. A missing heartbeat for a
-  // day means something broke — check the Actions tab.
-  if (state.lastHeartbeat !== today && ok) {
-    await push({
-      title: 'Ticket watch: running',
-      body: `Daily check-in. Hybrid Tickets is checked every ${INTERVAL_MINUTES} min while a run is active.\n${summaryLines.join('\n')}`,
-      priority: 'min',
-      admin: true,
-    });
-    state.lastHeartbeat = today;
-    console.log('heartbeat sent');
+  // Daily check-ins, once a day from 8 AM Eastern, only after a clean round,
+  // and only marked sent once ntfy accepted them (else tried again next round).
+  // Admin: the "yes, it's still running" signal; a missing one means something
+  // broke, so check the Actions tab. Alerts topic: tells everyone subscribed
+  // what's being watched, and that the topic works. Quiet banners ("low").
+  const local = localNow();
+  if (ok && local.hour >= CHECKIN_HOUR) {
+    if (state.lastHeartbeat !== local.date) {
+      const sent = await pushOk({
+        title: 'Ticket watch: running',
+        body: `Daily check-in. Hybrid Tickets is checked every ${INTERVAL_MINUTES} min while a run is active.\n${summaryLines.join('\n')}`,
+        priority: 'low',
+        admin: true,
+      });
+      if (sent) {
+        state.lastHeartbeat = local.date;
+        console.log('admin check-in sent');
+      }
+    }
+    if (WATCHING.length && state.lastCommunityHeartbeat !== local.date) {
+      const sent = await pushOk({
+        title: 'Ticket Watch: still watching',
+        body: `${WATCHING.join('\n')}\nYou'll get an alert here as soon as tickets come up.`,
+        priority: 'low',
+        click: 'https://hybridbyben.com/tickets/',
+      });
+      if (sent) {
+        state.lastCommunityHeartbeat = local.date;
+        console.log('alerts check-in sent');
+      }
+    }
   }
 
   await writeState(state);

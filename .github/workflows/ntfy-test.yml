@@ -1,0 +1,39 @@
+name: ntfy-test
+# Manual check that the ntfy secrets reach the right topics: sends a test
+# message to the admin topic (and, if asked, the alerts topic) and shows ntfy's
+# answer. Never prints a topic name, only its length and a short fingerprint
+# (first 8 characters of its SHA-256) to compare with the name you expect.
+on:
+  workflow_dispatch:
+    inputs:
+      alerts_too:
+        description: 'Also send a test to the alerts topic (everyone subscribed sees it)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send test messages
+        env:
+          NTFY_ADMIN_TOPIC: ${{ secrets.NTFY_ADMIN_TOPIC }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          ALERTS_TOO: ${{ inputs.alerts_too }}
+        run: |
+          node -e '
+          const { createHash } = require("crypto");
+          const send = async (label, topic, title) => {
+            if (!topic) return console.log(`${label}: secret not set`);
+            const fp = createHash("sha256").update(topic).digest("hex").slice(0, 8);
+            const odd = topic !== topic.trim() ? " (has spaces or a line break at the start or end!)" : "";
+            const res = await fetch("https://ntfy.sh/" + topic, { method: "POST", headers: { Title: title, Priority: "default" }, body: "If you can read this, GitHub reaches this topic." });
+            console.log(`${label}: ${topic.length} characters, fingerprint ${fp}${odd}; ntfy answered ${res.status}`);
+            if (res.status !== 200) process.exitCode = 1;
+          };
+          (async () => {
+            await send("admin topic", process.env.NTFY_ADMIN_TOPIC, "Test from GitHub (admin topic)");
+            if (process.env.ALERTS_TOO === "true") await send("alerts topic", process.env.NTFY_TOPIC, "Test from GitHub (alerts topic)");
+          })();
+          '
