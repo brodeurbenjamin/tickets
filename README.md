@@ -3,8 +3,8 @@
 HYROX ticket alerts for friends and the gym, at https://hybridbyben.com/tickets/.
 People request a race and division on the page; Ben approves; two watchers then
 check the official shop and Hybrid Tickets resale and alert the community ntfy
-topic when tickets come up. The full plan is in `PLAN.md` (branch
-`plan-community-watcher`).
+topic when tickets come up. Planning notes are kept in Ben's private
+planning repo.
 
 | Piece | What it does |
 |---|---|
