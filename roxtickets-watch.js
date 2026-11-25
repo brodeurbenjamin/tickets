@@ -55,7 +55,7 @@
 
 import { loadFiles, activeWatches, resaleEvents, divisionLabel } from './watchlist.js';
 import { saveStatus } from './status.js';
-import { alertRound, detailOf, saveAlerts } from './alerts.js';
+import { alertRound, detailOf, saveAlerts, saveCheckin } from './alerts.js';
 import { markFullLoop } from './chain.js';
 import { readFileSync } from 'fs';
 
@@ -66,7 +66,7 @@ import { readFileSync } from 'fs';
 // heartbeat lists each event with a sensible count once listings exist.
 // Past hard-coded targets (Paris, Phoenix) are in git history.
 // Loaded below, once push() exists to report an unreadable file.
-let WATCH, EVENTS, WATCHING;
+let WATCH, EVENTS, WATCHING, WATCHING_IDS;
 
 // "19-11-2026 THU" -> "2026-11-19"; null if unreadable.
 export function listingDate(t) {
@@ -222,6 +222,7 @@ try {
   WATCH = resaleEvents(active);
   EVENTS = Object.keys(WATCH);
   WATCHING = active.map((w) => `${w.race.city} ${divisionLabel(w.division)}`); // for the alerts check-in
+  WATCHING_IDS = active.map((w) => w.id);
 } catch (err) {
   console.log(`::error title=watchlist unreadable::${String(err.message).slice(0, 300)}`);
   await push({
@@ -405,6 +406,7 @@ async function checkOnce() {
       if (sent) {
         state.lastCommunityHeartbeat = local.date;
         console.log('alerts check-in sent');
+        saveCheckin('status/checkin.json', { title: 'Ticket Watch: still watching', detail: WATCHING.join('\n'), watches: WATCHING_IDS });
       }
     }
   }

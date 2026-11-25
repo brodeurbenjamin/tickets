@@ -77,3 +77,13 @@ export function saveAlerts(file, round, watchIds, now = new Date().toISOString()
   if (process.env.COMMIT_STATUS === '1') commit(file);
   return true;
 }
+
+// The daily "still watching" check-in to the alerts topic (written by
+// roxtickets-watch.js once ntfy accepted it): { title, detail, at, watches }.
+// `watches` lists the watch ids it covered, so the page shows it on those
+// races only. Written once a day, so one small commit a day.
+export function saveCheckin(file, { title, detail, watches }, now = new Date().toISOString()) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify({ title, detail, at: now, watches }, null, 2) + '\n');
+  if (process.env.COMMIT_STATUS === '1') commit(file);
+}

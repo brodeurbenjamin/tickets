@@ -176,16 +176,33 @@ function eastern(iso) {
   return `${p.weekday} ${p.day} ${p.month}, ${p.hour}:${p.minute} ${p.dayPeriod}`;
 }
 
+// One message row: label, bold title, detail, and a muted "when" line.
+function msgRow(label, title, detail, when) {
+  const d = detail ? ` · ${esc(detail.split('\n').join(' · '))}` : '';
+  return `<div class="latest"><span class="lbl">${esc(label)}</span><div>${title ? `<b>${esc(title)}</b>${d}` : ''}<div class="when">${when}</div></div></div>`;
+}
+const at = (iso) => `${esc(eastern(iso))} ET · ${esc(ago(iso))}`;
+
 // The newest of the two watchers' latest updates for this watch (alerts.js).
-function latestHtml(...entries) {
+function latestHtml(w, entries) {
   const a = entries.filter(Boolean).sort((x, y) => String(y.at).localeCompare(String(x.at)))[0];
-  if (!a) return `<div class="latest"><span class="lbl">Latest alert</span><div class="when">None yet</div></div>`;
-  const detail = a.detail ? ` · ${esc(a.detail.split('\n').join(' · '))}` : '';
-  const when = `${a.sent ? 'Sent' : 'Seen'} ${esc(eastern(a.at))} ET · ${esc(ago(a.at))}${a.sent ? '' : ' · no alert for this'}`;
-  return `<div class="latest"><span class="lbl">Latest ${a.sent ? 'alert' : 'update'}</span><div><b>${esc(a.title)}</b>${detail}<div class="when">${when}</div></div></div>`;
+  if (!a) return msgRow('Latest alert', 'None sent yet', '', w.created ? `Watching since ${esc(dayLong(w.created))}` : '');
+  return msgRow(a.sent ? 'Latest alert' : 'Latest update', a.title, a.detail, `${a.sent ? 'Sent' : 'Seen'} ${at(a.at)}${a.sent ? '' : ' · no alert for this'}`);
 }
 
-function watchHtml(w, race, shop, resale, alerts) {
+// The daily "still watching" check-in to the alerts topic, on the races it covered.
+function checkinHtml(w, checkin) {
+  if (!checkin || !(checkin.watches || []).includes(w.id)) return '';
+  return msgRow('Daily check-in', checkin.title, '', `Sent ${at(checkin.at)}`);
+}
+
+// "2026-11-23" -> "Mon 23 Nov"
+function dayLong(s) {
+  const t = ymd(s);
+  return `${DAYS[t.getUTCDay()].slice(0, 3)} ${t.getUTCDate()} ${MONTHS[t.getUTCMonth()]}`;
+}
+
+function watchHtml(w, race, shop, resale, alerts, checkin) {
   const head = `<h3>${esc(race.city)} · ${esc(divisionLabel(w.division))}</h3>
     <p class="meta">${esc(dateRange(race.start, race.end))} · asked by ${esc((w.requested_by || []).join(', '))}</p>`;
   let shopLine;
@@ -202,8 +219,9 @@ function watchHtml(w, race, shop, resale, alerts) {
   return `<div class="watch">${head}
     <div class="row line"><span class="lbl">Official shop</span>${shopLine}${shopLink}</div>
     <div class="row line"><span class="lbl">Resale</span>${resaleLine} <a class="pill" href="${RESALE_URL}" target="_blank" rel="noopener">Open Hybrid Tickets ↗</a></div>
-    ${latestHtml(...alerts)}
-    ${seen ? `<p class="note">Status last changed ${esc(ago(seen))}</p>` : ''}</div>`;
+    ${latestHtml(w, alerts)}
+    ${checkinHtml(w, checkin)}
+    ${seen ? `<p class="note">Shop and resale status unchanged since ${at(seen)}</p>` : ''}</div>`;
 }
 
 function fillRaces(events, today) {
@@ -245,10 +263,11 @@ const sameDivision = (a, b) => a.type === b.type && a.gender === b.gender && (a.
 
 async function main() {
   const today = new Date().toISOString().slice(0, 10);
-  const [ev, wl, shop, resale, shopAlerts, resaleAlerts] = await Promise.all([
+  const [ev, wl, shop, resale, shopAlerts, resaleAlerts, checkin] = await Promise.all([
     load('events.json', null), load('watchlist.json', null),
     load('status/shop.json', {}), load('status/resale.json', {}),
     load('status/alerts-shop.json', {}), load('status/alerts-resale.json', {}),
+    load('status/checkin.json', null),
   ]);
   if (!ev || !wl) {
     $('watches').innerHTML = `<p class="err">Couldn't load the watch list. Refresh the page to try again.</p>`;
@@ -260,7 +279,7 @@ async function main() {
 
   const active = live.filter((w) => w.status === 'active').sort(byDate);
   $('watches').innerHTML = active.length
-    ? active.map((w) => watchHtml(w, races[w.event], shop[w.id], resale[w.id], [shopAlerts[w.id], resaleAlerts[w.id]])).join('')
+    ? active.map((w) => watchHtml(w, races[w.event], shop[w.id], resale[w.id], [shopAlerts[w.id], resaleAlerts[w.id]], checkin)).join('')
     : '<p class="empty">Nothing is being watched right now.</p>';
 
   const pending = live.filter((w) => w.status === 'pending').sort(byDate);
