@@ -12,7 +12,7 @@ planning repo.
 | `watchlist.json` | Watches: race + division, `pending` or `active`, who asked |
 | `shop-watch.js` | Official shop, every 10 min during a run (`hyrox-watch.yml`) |
 | `roxtickets-watch.js` | Hybrid Tickets resale, every 5 min during a run (`roxtickets-watch.yml`) |
-| `status/*.json` | What the watchers last saw, and the latest alert sent, per watch, for the page (`status.js`, `alerts.js`) |
+| `status/*.json` | What the watchers last saw, the latest alert per watch, and the last daily check-in, for the page (`status.js`, `alerts.js`) |
 | `site/` | The request page (`pages.yml`) |
 | `google-form/Code.gs` | Takes requests from the page, Approve / Decline links |
 
