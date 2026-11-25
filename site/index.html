@@ -34,6 +34,9 @@
   .pill.off { color:var(--muted) }
   a.pill { color:var(--accent); border-color:var(--accent); text-decoration:none; font-weight:600 }
   .line { margin-top:6px }
+  .latest { margin-top:8px; display:flex; gap:6px; align-items:baseline }
+  .latest > div { min-width:0; font-size:13px } .latest b { font-weight:600 }
+  .latest .when { color:var(--muted) }
   label { display:block; font-size:13px; color:var(--muted); margin-bottom:4px }
   select, input { display:block; width:100%; min-width:0; height:44px; margin:0; padding:0 10px;
                   border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--text);
@@ -160,12 +163,29 @@ function divisionLabel(d) {
 function ago(iso) {
   const min = Math.round((Date.now() - new Date(iso)) / 60000);
   if (!(min >= 0)) return '';
+  if (min < 1) return 'just now';
   if (min < 60) return `${min} min ago`;
   if (min < 48 * 60) return `${Math.round(min / 60)} h ago`;
   return `${Math.round(min / 1440)} days ago`;
 }
 
-function watchHtml(w, race, shop, resale) {
+// "Mon 24 Nov, 9:14 AM" in Eastern time (Ben's and the watchers' check-in zone).
+function eastern(iso) {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Toronto', weekday: 'short', day: 'numeric',
+    month: 'short', hour: 'numeric', minute: '2-digit' }).formatToParts(new Date(iso)).map((x) => [x.type, x.value]));
+  return `${p.weekday} ${p.day} ${p.month}, ${p.hour}:${p.minute} ${p.dayPeriod}`;
+}
+
+// The newest of the two watchers' latest updates for this watch (alerts.js).
+function latestHtml(...entries) {
+  const a = entries.filter(Boolean).sort((x, y) => String(y.at).localeCompare(String(x.at)))[0];
+  if (!a) return `<div class="latest"><span class="lbl">Latest alert</span><div class="when">None yet</div></div>`;
+  const detail = a.detail ? ` · ${esc(a.detail.split('\n').join(' · '))}` : '';
+  const when = `${a.sent ? 'Sent' : 'Seen'} ${esc(eastern(a.at))} ET · ${esc(ago(a.at))}${a.sent ? '' : ' · no alert for this'}`;
+  return `<div class="latest"><span class="lbl">Latest ${a.sent ? 'alert' : 'update'}</span><div><b>${esc(a.title)}</b>${detail}<div class="when">${when}</div></div></div>`;
+}
+
+function watchHtml(w, race, shop, resale, alerts) {
   const head = `<h3>${esc(race.city)} · ${esc(divisionLabel(w.division))}</h3>
     <p class="meta">${esc(dateRange(race.start, race.end))} · asked by ${esc((w.requested_by || []).join(', '))}</p>`;
   let shopLine;
@@ -182,7 +202,8 @@ function watchHtml(w, race, shop, resale) {
   return `<div class="watch">${head}
     <div class="row line"><span class="lbl">Official shop</span>${shopLine}${shopLink}</div>
     <div class="row line"><span class="lbl">Resale</span>${resaleLine} <a class="pill" href="${RESALE_URL}" target="_blank" rel="noopener">Open Hybrid Tickets ↗</a></div>
-    ${seen ? `<p class="note">Last change ${esc(ago(seen))}</p>` : ''}</div>`;
+    ${latestHtml(...alerts)}
+    ${seen ? `<p class="note">Status last changed ${esc(ago(seen))}</p>` : ''}</div>`;
 }
 
 function fillRaces(events, today) {
@@ -224,9 +245,10 @@ const sameDivision = (a, b) => a.type === b.type && a.gender === b.gender && (a.
 
 async function main() {
   const today = new Date().toISOString().slice(0, 10);
-  const [ev, wl, shop, resale] = await Promise.all([
+  const [ev, wl, shop, resale, shopAlerts, resaleAlerts] = await Promise.all([
     load('events.json', null), load('watchlist.json', null),
     load('status/shop.json', {}), load('status/resale.json', {}),
+    load('status/alerts-shop.json', {}), load('status/alerts-resale.json', {}),
   ]);
   if (!ev || !wl) {
     $('watches').innerHTML = `<p class="err">Couldn't load the watch list. Refresh the page to try again.</p>`;
@@ -238,7 +260,7 @@ async function main() {
 
   const active = live.filter((w) => w.status === 'active').sort(byDate);
   $('watches').innerHTML = active.length
-    ? active.map((w) => watchHtml(w, races[w.event], shop[w.id], resale[w.id])).join('')
+    ? active.map((w) => watchHtml(w, races[w.event], shop[w.id], resale[w.id], [shopAlerts[w.id], resaleAlerts[w.id]])).join('')
     : '<p class="empty">Nothing is being watched right now.</p>';
 
   const pending = live.filter((w) => w.status === 'pending').sort(byDate);

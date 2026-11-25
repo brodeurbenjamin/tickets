@@ -16,7 +16,7 @@ on:
         default: '180'
  
 permissions:
-  contents: write   # status/shop.json is committed when a ticket's status changes
+  contents: write   # status/shop.json and status/alerts-shop.json are committed when they change
   actions: write    # chain.js starts the next run
 concurrency:
   group: hyrox-watch

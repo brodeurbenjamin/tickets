@@ -36,6 +36,7 @@ import { chromium } from 'playwright';
 import { readFileSync } from 'fs';
 import { loadFiles, activeWatches, shopChecks } from './watchlist.js';
 import { saveStatus } from './status.js';
+import { alertRound, detailOf, saveAlerts } from './alerts.js';
 import { markFullLoop } from './chain.js';
 
 // Ticket alerts go to the community topic; problems (a failing check, the shop
@@ -58,7 +59,11 @@ async function push({ title, body, priority = 'default', click, admin = false })
   if (click) headers.Click = click;
   const res = await fetch(`https://ntfy.sh/${admin ? NTFY_ADMIN_TOPIC : NTFY_TOPIC}`, { method: 'POST', headers, body });
   if (!res.ok) console.error(`ntfy responded ${res.status}`);
+  return res.ok;
 }
+
+// This round's community alerts, for the page's "Latest" line (alerts.js).
+let alerts = alertRound();
 
 // [{ name, disabled }] for every ticket card on screen.
 export async function readTickets(page) {
@@ -200,12 +205,13 @@ async function runShop(browser, shop, checks) {
       status[check.id] = { days: matches.map((t) => ({ day: shortDate(t), buyable: !t.disabled, price: t.price })) };
 
       if (tier === 'urgent') {
-        await push({
+        const alert = {
           title: `${check.label}: tickets available`,
           body: `${ticketLines(buyable)}\nOn sale now on the official shop. Tap to open it.`,
           priority: 'urgent',
           click: check.shop,
-        });
+        };
+        if (await push(alert)) alerts.add([check.id], { ...alert, detail: detailOf(alert.body) });
         console.log('  notification sent (urgent)');
       } else if (tier === 'structure') {
         await push({
@@ -312,6 +318,16 @@ async function main() {
       return [c.id, rest];
     }));
     if (saveStatus('status/shop.json', { ...keep, ...status })) console.log('status/shop.json updated');
+    // Tickets that were on sale and now aren't: shown on the page, not alerted.
+    for (const c of checks) {
+      const was = previous[c.id]?.days?.some((d) => d.buyable);
+      const now = status[c.id]?.days?.some((d) => d.buyable);
+      if (was && status[c.id] && !now && !alerts.picked.has(c.id)) {
+        alerts.add([c.id], { title: `${c.label}: sold out again`, detail: '', priority: 'low', sent: false });
+      }
+    }
+    if (saveAlerts('status/alerts-shop.json', alerts, checks.map((c) => c.id))) console.log('status/alerts-shop.json updated');
+    alerts = alertRound();
     for (const f of lastFailed) {
       console.log(`::error title=${f.label} check failed::${f.msg}`);
       if (!failing.has(f.label)) {
