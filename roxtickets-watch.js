@@ -55,6 +55,7 @@
 
 import { loadFiles, activeWatches, resaleEvents, divisionLabel } from './watchlist.js';
 import { saveStatus } from './status.js';
+import { alertRound, detailOf, saveAlerts } from './alerts.js';
 import { markFullLoop } from './chain.js';
 import { readFileSync } from 'fs';
 
@@ -249,6 +250,13 @@ async function checkOnce() {
   // whose check fails keeps its last known status.
   const status = {};
   const previous = (() => { try { return JSON.parse(readFileSync('status/resale.json', 'utf8')); } catch { return {}; } })();
+  // This round's community alerts, for the page's "Latest" line (alerts.js).
+  const alerts = alertRound();
+  const sendAlert = async (ids, msg) => {
+    const res = await push(msg);
+    if (res.ok) alerts.add(ids, { ...msg, detail: detailOf(msg.body) });
+    else console.log(`  ntfy answered ${res.status} for "${msg.title}"`);
+  };
 
   for (const eventName of EVENTS) {
     try {
@@ -287,7 +295,8 @@ async function checkOnce() {
 
       if (confirmed.length > 0) {
         const cheapest = confirmed.reduce((a, b) => (a.total < b.total ? a : b));
-        await push({
+        const matched = cfg.cfgs.filter((c) => status[c.id].listings.length).map((c) => c.id);
+        await sendAlert(matched.length ? matched : cfg.cfgs.map((c) => c.id), {
           title: `${eventName} ${new Set(confirmed.map((t) => t.category_name)).size > 1 ? cfg.label : pretty(cheapest.category_name)}: resale listing`,
           body:
             confirmed.map((t) => `${pretty(t.category_name)}, ${dayLabel(t)} - $${t.total}`).join('\n') +
@@ -299,7 +308,7 @@ async function checkOnce() {
 
       if (fallbackOnly.length > 0) {
         const cheapest = fallbackOnly.reduce((a, b) => (a.total < b.total ? a : b));
-        await push({
+        await sendAlert(cfg.cfgs.map((c) => c.id), {
           title: `${eventName}: possible ${cfg.label} listing`,
           body:
             `Listed as "${cheapest.category_name}", ${dayLabel(cheapest)} - $${cheapest.total}. ` +
@@ -320,7 +329,7 @@ async function checkOnce() {
         // Skip the very first-ever run (prevCount === null) — that's just
         // establishing the baseline, not a real change worth a ping.
         if (prevCount !== null) {
-          await push({
+          await sendAlert(cfg.cfgs.map((c) => c.id), {
             title: `${eventName} resale: ${available.length > prevCount ? 'new listing' : 'listing gone'}`,
             body:
               `${available.length} listing${available.length === 1 ? '' : 's'} on Hybrid Tickets now (was ${prevCount}).` +
@@ -362,6 +371,8 @@ async function checkOnce() {
     }
   }
   if (saveStatus('status/resale.json', status)) console.log('status/resale.json updated');
+  const ids = Object.values(WATCH).flatMap((e) => e.cfgs.map((c) => c.id));
+  if (saveAlerts('status/alerts-resale.json', alerts, ids)) console.log('status/alerts-resale.json updated');
 
   if (EVENTS.length === 0) summaryLines.push('No active watches right now.');
 

@@ -49,7 +49,7 @@ function git(...args) {
   return execFileSync('git', args, { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
 }
 
-function commit(file) {
+export function commit(file) {
   try {
     git('add', file);
     git('-c', 'user.name=ticket-status bot', '-c', 'user.email=actions@github.com', 'commit', '-m', `update ${file}`);
