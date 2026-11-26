@@ -28,10 +28,10 @@
     "days": [
       {
         "day": "Friday",
-        "buyable": true,
+        "buyable": false,
         "price": null
       }
     ],
-    "since": "2026-11-26T04:01:39.921Z"
+    "since": "2026-11-26T04:11:39.870Z"
   }
 }
