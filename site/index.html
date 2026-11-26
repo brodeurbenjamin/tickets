@@ -176,30 +176,27 @@ function eastern(iso) {
   return `${p.weekday} ${p.day} ${p.month}, ${p.hour}:${p.minute} ${p.dayPeriod}`;
 }
 
-// One message row: label, bold title, detail, and a muted "when" line.
+// One labelled row: bold title, detail, and a muted "when" line below.
 function msgRow(label, title, detail, when) {
   const d = detail ? ` · ${esc(detail.split('\n').join(' · '))}` : '';
-  return `<div class="latest"><span class="lbl">${esc(label)}</span><div>${title ? `<b>${esc(title)}</b>${d}` : ''}<div class="when">${when}</div></div></div>`;
+  return `<div class="latest"><span class="lbl">${esc(label)}</span><div>${title ? `<b>${esc(title)}</b>${d}` : ''}${when ? `<div class="when">${when}</div>` : ''}</div></div>`;
 }
-const at = (iso) => `${esc(eastern(iso))} ET · ${esc(ago(iso))}`;
+// "Wed 25 Nov, 8:02 AM ET (14 h ago)"
+const at = (iso) => `${esc(eastern(iso))} ET (${esc(ago(iso))})`;
 
 // The newest of the two watchers' latest updates for this watch (alerts.js).
 function latestHtml(w, entries) {
   const a = entries.filter(Boolean).sort((x, y) => String(y.at).localeCompare(String(x.at)))[0];
-  if (!a) return msgRow('Latest alert', 'None sent yet', '', w.created ? `Watching since ${esc(dayLong(w.created))}` : '');
-  return msgRow(a.sent ? 'Latest alert' : 'Latest update', a.title, a.detail, `${a.sent ? 'Sent' : 'Seen'} ${at(a.at)}${a.sent ? '' : ' · no alert for this'}`);
+  if (!a) return msgRow('Alerts', '', '', 'None yet: nothing has come up for this division.');
+  if (!a.sent) return msgRow('Last change', a.title, a.detail, `${at(a.at)} · no alert was sent for this`);
+  return msgRow('Last alert', a.title, a.detail, at(a.at));
 }
 
-// The daily "still watching" check-in to the alerts topic, on the races it covered.
+// The watcher's daily "still watching" check-in to the alerts topic, on the races it covered.
 function checkinHtml(w, checkin) {
   if (!checkin || !(checkin.watches || []).includes(w.id)) return '';
-  return msgRow('Daily check-in', checkin.title, '', `Sent ${at(checkin.at)}`);
-}
-
-// "2026-11-23" -> "Mon 23 Nov"
-function dayLong(s) {
-  const t = ymd(s);
-  return `${DAYS[t.getUTCDay()].slice(0, 3)} ${t.getUTCDate()} ${MONTHS[t.getUTCMonth()]}`;
+  const late = Date.now() - new Date(checkin.at) > 30 * 3600e3;
+  return msgRow('Watcher', '', '', `${late ? 'Daily check-in overdue' : 'Running'}. Last daily check-in ${at(checkin.at)}.`);
 }
 
 function watchHtml(w, race, shop, resale, alerts, checkin) {
@@ -221,7 +218,7 @@ function watchHtml(w, race, shop, resale, alerts, checkin) {
     <div class="row line"><span class="lbl">Resale</span>${resaleLine} <a class="pill" href="${RESALE_URL}" target="_blank" rel="noopener">Open Hybrid Tickets ↗</a></div>
     ${latestHtml(w, alerts)}
     ${checkinHtml(w, checkin)}
-    ${seen ? `<p class="note">Shop and resale status unchanged since ${at(seen)}</p>` : ''}</div>`;
+    ${seen ? `<p class="note">No change on the shop or resale since ${at(seen)}.</p>` : ''}</div>`;
 }
 
 function fillRaces(events, today) {
